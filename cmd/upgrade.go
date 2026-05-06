@@ -40,6 +40,10 @@ func newUpgradeCmd(deps Deps) *cobra.Command {
 
 		reuseValues bool
 		resetValues bool
+
+		// helm-diff defaults: non-test hooks IN, test hooks OUT.
+		noHooks      bool
+		includeTests bool
 	)
 
 	cmd := &cobra.Command{
@@ -88,6 +92,8 @@ install --dry-run as the fallback for missing releases).`,
 				ChartVersion: chartVersion,
 				ReuseValues:  reuseValues,
 				ResetValues:  resetValues,
+				IncludeHooks: !noHooks,
+				IncludeTests: includeTests && !noHooks,
 			}
 
 			// Plugin --dry-run: print the plan without contacting the
@@ -172,6 +178,9 @@ install --dry-run as the fallback for missing releases).`,
 
 	f.BoolVar(&reuseValues, "reuse-values", false, "reuse the existing release's values, merge new -f/--set on top (CLI wins)")
 	f.BoolVar(&resetValues, "reset-values", false, "ignore the existing release's values; render with chart defaults + CLI overrides (overrides --reuse-values)")
+
+	f.BoolVar(&noHooks, "no-hooks", false, "exclude all helm hook resources (pre/post-install/upgrade/etc.) from the diff")
+	f.BoolVar(&includeTests, "include-tests", false, "also include test-event hooks (helm.sh/hook=test) — ignored if --no-hooks is set")
 
 	return cmd
 }

@@ -209,14 +209,14 @@ echo "==> --reuse-values reuses the deployed release's values"
 # Release is at revision 2 with values-changed.yaml (replicas=3). Render
 # the chart with no -f (chart defaults: replicas=2). --reuse-values must
 # pull the deployed replicas=3 back in so the diff is empty.
-no_flag="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE")" \
+no_flag="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --no-hooks)" \
   || fail "default upgrade exited non-zero"
 case "$no_flag" in
   *replicas*) pass "without --reuse-values: chart defaults differ from release (expected)" ;;
   *)          fail "expected default render to differ from release, got: $no_flag" ;;
 esac
 
-reuse="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --reuse-values)" \
+reuse="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --reuse-values --no-hooks)" \
   || fail "--reuse-values upgrade exited non-zero"
 case "$reuse" in
   *no\ differences\ found*) pass "--reuse-values yields empty diff (release values reused)" ;;
@@ -224,11 +224,40 @@ case "$reuse" in
 esac
 
 # --reset-values overrides --reuse-values (helm-diff parity).
-both="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --reuse-values --reset-values)" \
+both="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --reuse-values --reset-values --no-hooks)" \
   || fail "--reuse-values --reset-values upgrade exited non-zero"
 case "$both" in
   *replicas*) pass "--reset-values overrides --reuse-values" ;;
   *)          fail "expected reset to win and produce a non-empty diff, got: $both" ;;
+esac
+
+echo "==> hook + test flag combinations"
+# Default (neither flag): pre-upgrade hook IS in the diff, test pod IS NOT.
+default_render="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE")" \
+  || fail "default upgrade exited non-zero"
+case "$default_render" in
+  *preupgrade-hook*)    pass "default render includes non-test hooks" ;;
+  *)                    fail "expected pre-upgrade hook in default render, got: $default_render" ;;
+esac
+case "$default_render" in
+  *test-connection*)    fail "default render should NOT include test hooks, got: $default_render" ;;
+  *)                    pass "default render excludes test hooks" ;;
+esac
+
+# --include-tests: both hook types appear.
+with_tests="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" --include-tests)" \
+  || fail "--include-tests upgrade exited non-zero"
+case "$with_tests" in
+  *test-connection*Pod*|*Pod*test-connection*) pass "--include-tests adds test hook resources" ;;
+  *)                                            fail "expected test pod in --include-tests output, got: $with_tests" ;;
+esac
+
+# --no-hooks: neither hook type appears.
+no_hooks="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" --no-hooks)" \
+  || fail "--no-hooks upgrade exited non-zero"
+case "$no_hooks" in
+  *preupgrade*|*test-connection*) fail "--no-hooks should strip all hook resources, got: $no_hooks" ;;
+  *)                              pass "--no-hooks excludes both pre-upgrade and test hooks" ;;
 esac
 
 echo

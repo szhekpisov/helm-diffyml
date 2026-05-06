@@ -98,6 +98,8 @@ and `rollback` subcommands only need `-n, --namespace`.
 | `--three-way-merge` *(`upgrade` only)* | Diff against **live cluster state** instead of the stored manifest, computing a strategic-merge three-way patch per resource (JSON merge fallback for CRDs). Catches out-of-band drift like `kubectl edit`, controller-applied mutations, and admission-webhook-injected fields that `helm get manifest` doesn't see. Resources tracked by the release but absent from the new render show up as deletions. Composes with `--use-upgrade-dry-run` for the target side. Toggle with `HELM_DIFFYML_THREE_WAY_MERGE=true`; `--no-three-way-merge` overrides per call. |
 | `--reuse-values` *(`upgrade` only)* | Reuse the existing release's stored values, merging new `-f`/`--set` on top (CLI wins on conflict). Mirrors `helm upgrade --reuse-values`. |
 | `--reset-values` *(`upgrade` only)* | Ignore the existing release's values; render with chart defaults + CLI overrides. Mirrors `helm upgrade --reset-values`. If both `--reuse-values` and `--reset-values` are passed, `--reset-values` wins (helm-diff parity). |
+| `--no-hooks` *(`upgrade` only)* | Strip helm hook resources (pre/post-install/upgrade/etc.) from the rendered diff. By default hooks are included (matching helm-diff). |
+| `--include-tests` *(`upgrade` only)* | Also include test-event hooks (`helm.sh/hook=test`) in the diff. Off by default; ignored when `--no-hooks` is set. |
 
 > The plugin owns `--no-*` flags. Do not pass `--no-neat` through the `--` escape
 > hatch — `diffyml` itself has no `--no-neat`, only `--neat`.

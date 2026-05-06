@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"helm.sh/helm/v3/pkg/release"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -170,6 +171,43 @@ func TestComputeThreeWayStrategicMergeMergesArraysByKey(t *testing.T) {
 	}
 	if !contains(projected, "envoy:1.30") {
 		t.Errorf("expected sidecar to survive in projected state; got %s", projected)
+	}
+}
+
+// TestMergeHooks covers the includeNonTest / includeTests matrix that
+// drives --no-hooks / --include-tests behaviour.
+func TestMergeHooks(t *testing.T) {
+	manifest := "kind: ConfigMap\nmetadata:\n  name: cm\n"
+	hooks := []*release.Hook{
+		{Name: "pre-up", Manifest: "kind: Job\nmetadata:\n  name: pre-up\n", Events: []release.HookEvent{release.HookPreUpgrade}},
+		{Name: "test-conn", Manifest: "kind: Pod\nmetadata:\n  name: test-conn\n", Events: []release.HookEvent{release.HookTest}},
+	}
+
+	cases := []struct {
+		name              string
+		includeNonTest    bool
+		includeTests      bool
+		wantPreUpgrade    bool
+		wantTestConn      bool
+	}{
+		{name: "neither", includeNonTest: false, includeTests: false, wantPreUpgrade: false, wantTestConn: false},
+		{name: "non-test only (helm-diff default)", includeNonTest: true, includeTests: false, wantPreUpgrade: true, wantTestConn: false},
+		{name: "with tests", includeNonTest: true, includeTests: true, wantPreUpgrade: true, wantTestConn: true},
+		{name: "tests only (unusual)", includeNonTest: false, includeTests: true, wantPreUpgrade: false, wantTestConn: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeHooks(manifest, hooks, tc.includeNonTest, tc.includeTests)
+			if has := strings.Contains(got, "pre-up"); has != tc.wantPreUpgrade {
+				t.Errorf("pre-upgrade hook: got=%v want=%v\n%s", has, tc.wantPreUpgrade, got)
+			}
+			if has := strings.Contains(got, "test-conn"); has != tc.wantTestConn {
+				t.Errorf("test hook: got=%v want=%v\n%s", has, tc.wantTestConn, got)
+			}
+			if !strings.Contains(got, "kind: ConfigMap") {
+				t.Errorf("manifest body should always be present, got:\n%s", got)
+			}
+		})
 	}
 }
 

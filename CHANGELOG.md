@@ -9,6 +9,13 @@ Each plugin tag pins a specific `diffyml` version (embedded as a Go library).
 ## [Unreleased]
 
 ### Added
+- `helm diffyml upgrade --no-hooks` and `--include-tests` — control which
+  helm hooks appear in the rendered diff. Default matches helm-diff:
+  non-test hooks are included (so pre/post-install/upgrade hooks show up
+  in the preview), test-event hooks are excluded. `--no-hooks` strips
+  every hook; `--include-tests` adds the test pods back in. Hooks live
+  in `release.Release.Hooks` separately from `Manifest`, and are merged
+  in by the plugin per the flag combination.
 - `helm diffyml upgrade --reuse-values` and `--reset-values` — mirror
   `helm upgrade`'s value-merging semantics. `--reuse-values` pulls the
   deployed release's values back in (with new `-f`/`--set` overriding on

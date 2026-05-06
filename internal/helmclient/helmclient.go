@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -147,7 +148,37 @@ func (c *Client) Template(releaseName, chartPath string, opts RenderOptions) ([]
 	if err != nil {
 		return nil, err
 	}
-	return []byte(rel.Manifest), nil
+	return []byte(mergeHooks(rel.Manifest, rel.Hooks, opts.IncludeHooks, opts.IncludeTests)), nil
+}
+
+// mergeHooks appends non-test (and optionally test) hook manifests to the
+// rendered manifest. helm template normally returns rel.Manifest with the
+// non-hook resources only; rel.Hooks holds each hook's rendered YAML
+// alongside its event metadata.
+func mergeHooks(manifest string, hooks []*release.Hook, includeNonTest, includeTests bool) string {
+	if !includeNonTest && !includeTests {
+		return manifest
+	}
+	var b strings.Builder
+	b.WriteString(manifest)
+	for _, h := range hooks {
+		isTest := false
+		for _, e := range h.Events {
+			if e == release.HookTest {
+				isTest = true
+				break
+			}
+		}
+		if (isTest && !includeTests) || (!isTest && !includeNonTest) {
+			continue
+		}
+		if !strings.HasSuffix(b.String(), "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("---\n")
+		b.WriteString(h.Manifest)
+	}
+	return b.String()
 }
 
 // mergeReuseValues fetches the deployed release's values and merges the
@@ -195,7 +226,7 @@ func (c *Client) UpgradeDryRun(releaseName, chartPath string, opts RenderOptions
 	if err != nil {
 		return nil, err
 	}
-	return []byte(rel.Manifest), nil
+	return []byte(mergeHooks(rel.Manifest, rel.Hooks, opts.IncludeHooks, opts.IncludeTests)), nil
 }
 
 // InstallDryRun runs `helm install --dry-run` against the live cluster.
@@ -222,7 +253,7 @@ func (c *Client) InstallDryRun(releaseName, chartPath string, opts RenderOptions
 	if err != nil {
 		return nil, err
 	}
-	return []byte(rel.Manifest), nil
+	return []byte(mergeHooks(rel.Manifest, rel.Hooks, opts.IncludeHooks, opts.IncludeTests)), nil
 }
 
 func (c *Client) namespaceFor(opts RenderOptions) string {
@@ -246,6 +277,12 @@ type RenderOptions struct {
 	// `helm upgrade --reset-values`. If both are set, ResetValues wins
 	// (matching helm-diff's behaviour).
 	ResetValues bool
+	// IncludeHooks, when true, appends non-test hook resources to the
+	// rendered manifest (matching helm-diff's default).
+	IncludeHooks bool
+	// IncludeTests, when true, additionally includes test-event hooks
+	// (helm.sh/hook=test). Has no effect unless IncludeHooks is also set.
+	IncludeTests bool
 	// ValueFiles is `-f, --values FILE` (multiple allowed).
 	ValueFiles []string
 	// Set is `--set NAME=VALUE` (multiple allowed).
