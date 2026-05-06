@@ -37,6 +37,9 @@ func newUpgradeCmd(deps Deps) *cobra.Command {
 
 		threeWayMerge   bool
 		noThreeWayMerge bool
+
+		reuseValues bool
+		resetValues bool
 	)
 
 	cmd := &cobra.Command{
@@ -83,6 +86,8 @@ install --dry-run as the fallback for missing releases).`,
 				SetFile:      setFileVals,
 				Devel:        devel,
 				ChartVersion: chartVersion,
+				ReuseValues:  reuseValues,
+				ResetValues:  resetValues,
 			}
 
 			// Plugin --dry-run: print the plan without contacting the
@@ -165,6 +170,9 @@ install --dry-run as the fallback for missing releases).`,
 	f.BoolVar(&threeWayMerge, "three-way-merge", false, "diff against live cluster state (catches out-of-band drift); composes with --use-upgrade-dry-run")
 	f.BoolVar(&noThreeWayMerge, "no-three-way-merge", false, "override HELM_DIFFYML_THREE_WAY_MERGE=true on a single call")
 
+	f.BoolVar(&reuseValues, "reuse-values", false, "reuse the existing release's values, merge new -f/--set on top (CLI wins)")
+	f.BoolVar(&resetValues, "reset-values", false, "ignore the existing release's values; render with chart defaults + CLI overrides (overrides --reuse-values)")
+
 	return cmd
 }
 
@@ -231,6 +239,12 @@ func summariseRender(opts helmclient.RenderOptions) string {
 	}
 	if opts.Devel {
 		parts = append(parts, "--devel")
+	}
+	if opts.ReuseValues {
+		parts = append(parts, "--reuse-values")
+	}
+	if opts.ResetValues {
+		parts = append(parts, "--reset-values")
 	}
 	return strings.Join(parts, " ")
 }

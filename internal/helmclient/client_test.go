@@ -225,6 +225,75 @@ func TestUpgradeDryRunMissingChart(t *testing.T) {
 	}
 }
 
+func TestTemplateReuseValuesMergesDeployedValues(t *testing.T) {
+	chartPath, fixtureChart := loadFixtureChart(t)
+	// Each scenario seeds its own client because action.NewInstall.Run
+	// (used by Template) mutates the in-memory release storage with a
+	// "pending" placeholder, which would otherwise hide the seeded values
+	// from subsequent action.NewGetValues calls.
+	seed := func(name string) *Client {
+		c := memoryClient(t)
+		rel := &release.Release{
+			Name:      name,
+			Namespace: "default",
+			Version:   1,
+			Info: &release.Info{
+				FirstDeployed: helmtime.Now(),
+				LastDeployed:  helmtime.Now(),
+				Status:        release.StatusDeployed,
+			},
+			Chart: fixtureChart,
+			Config: map[string]interface{}{
+				"config": map[string]interface{}{"greeting": "bonjour"},
+				"image":  map[string]interface{}{"tag": "1.27"},
+			},
+		}
+		if err := c.cfg.Releases.Create(rel); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+
+	// Without ReuseValues: chart defaults win.
+	out, err := seed("rv-default").Template("rv-default", chartPath, RenderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(out, "greeting: \"hello\"") {
+		t.Errorf("expected chart-default greeting=hello, got:\n%s", out)
+	}
+
+	// With ReuseValues: the release's bonjour wins (no CLI override).
+	out, err = seed("rv-reuse").Template("rv-reuse", chartPath, RenderOptions{ReuseValues: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(out, "greeting: \"bonjour\"") {
+		t.Errorf("expected reused greeting=bonjour, got:\n%s", out)
+	}
+
+	// With both ReuseValues and ResetValues: ResetValues wins (chart defaults).
+	out, err = seed("rv-reset").Template("rv-reset", chartPath, RenderOptions{ReuseValues: true, ResetValues: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(out, "greeting: \"hello\"") {
+		t.Errorf("expected reset=hello (ResetValues wins), got:\n%s", out)
+	}
+}
+
+func TestTemplateReuseValuesAgainstMissingRelease(t *testing.T) {
+	c := memoryClient(t)
+	chartPath, _ := loadFixtureChart(t)
+	out, err := c.Template("never-installed", chartPath, RenderOptions{ReuseValues: true})
+	if err != nil {
+		t.Fatalf("expected no error when reuse target doesn't exist: %v", err)
+	}
+	if !contains(out, "greeting: \"hello\"") {
+		t.Errorf("expected chart-default render when no release to reuse from, got:\n%s", out)
+	}
+}
+
 func TestRenderForThreeWayBranches(t *testing.T) {
 	c := memoryClient(t)
 	chartPath, _ := loadFixtureChart(t)

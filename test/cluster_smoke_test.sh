@@ -205,5 +205,31 @@ case "$removed" in
 esac
 rm -rf "$PRUNED"
 
+echo "==> --reuse-values reuses the deployed release's values"
+# Release is at revision 2 with values-changed.yaml (replicas=3). Render
+# the chart with no -f (chart defaults: replicas=2). --reuse-values must
+# pull the deployed replicas=3 back in so the diff is empty.
+no_flag="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE")" \
+  || fail "default upgrade exited non-zero"
+case "$no_flag" in
+  *replicas*) pass "without --reuse-values: chart defaults differ from release (expected)" ;;
+  *)          fail "expected default render to differ from release, got: $no_flag" ;;
+esac
+
+reuse="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --reuse-values)" \
+  || fail "--reuse-values upgrade exited non-zero"
+case "$reuse" in
+  *no\ differences\ found*) pass "--reuse-values yields empty diff (release values reused)" ;;
+  *)                        fail "expected empty diff with --reuse-values, got: $reuse" ;;
+esac
+
+# --reset-values overrides --reuse-values (helm-diff parity).
+both="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -n "$NAMESPACE" --reuse-values --reset-values)" \
+  || fail "--reuse-values --reset-values upgrade exited non-zero"
+case "$both" in
+  *replicas*) pass "--reset-values overrides --reuse-values" ;;
+  *)          fail "expected reset to win and produce a non-empty diff, got: $both" ;;
+esac
+
 echo
 echo "All cluster smoke checks passed."

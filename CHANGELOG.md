@@ -9,6 +9,12 @@ Each plugin tag pins a specific `diffyml` version (embedded as a Go library).
 ## [Unreleased]
 
 ### Added
+- `helm diffyml upgrade --reuse-values` and `--reset-values` — mirror
+  `helm upgrade`'s value-merging semantics. `--reuse-values` pulls the
+  deployed release's values back in (with new `-f`/`--set` overriding on
+  conflict); `--reset-values` ignores them entirely (chart defaults +
+  CLI overrides). Passing both has `--reset-values` win, matching
+  helm-diff. Composes with `--use-upgrade-dry-run` and `--three-way-merge`.
 - `helm diffyml upgrade --three-way-merge` (env: `HELM_DIFFYML_THREE_WAY_MERGE`)
   — diff against live cluster state via three-way merge per resource.
   Catches out-of-band drift (`kubectl edit`, controller mutations,

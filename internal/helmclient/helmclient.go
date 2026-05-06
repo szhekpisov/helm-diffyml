@@ -11,6 +11,7 @@ import (
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/cli/values"
 	"helm.sh/helm/v3/pkg/getter"
@@ -110,7 +111,10 @@ func (c *Client) PreviousRevision(name string) (int, error) {
 }
 
 // Template renders the chart locally (the equivalent of `helm template`).
-// No cluster contact, no `lookup`.
+// No cluster contact, no `lookup`. Honours opts.ReuseValues by merging the
+// existing release's stored values into the CLI-supplied values (CLI wins
+// on key conflict). opts.ResetValues is a no-op for Template — the helm
+// template path always starts from chart defaults + CLI overrides anyway.
 func (c *Client) Template(releaseName, chartPath string, opts RenderOptions) ([]byte, error) {
 	chart, err := loader.Load(chartPath)
 	if err != nil {
@@ -119,6 +123,12 @@ func (c *Client) Template(releaseName, chartPath string, opts RenderOptions) ([]
 	vals, err := opts.merged(c.settings)
 	if err != nil {
 		return nil, err
+	}
+	if opts.ReuseValues && !opts.ResetValues {
+		vals, err = c.mergeReuseValues(releaseName, vals)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	inst := action.NewInstall(c.cfg)
@@ -140,6 +150,27 @@ func (c *Client) Template(releaseName, chartPath string, opts RenderOptions) ([]
 	return []byte(rel.Manifest), nil
 }
 
+// mergeReuseValues fetches the deployed release's values and merges the
+// caller's CLI-derived values on top (CLI wins on conflict). If the release
+// doesn't exist yet, returns the CLI values unchanged.
+func (c *Client) mergeReuseValues(releaseName string, cliVals map[string]any) (map[string]any, error) {
+	getter := action.NewGetValues(c.cfg)
+	getter.AllValues = true
+	existing, err := getter.Run(releaseName)
+	if err != nil {
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			return cliVals, nil
+		}
+		return nil, fmt.Errorf("get release values for --reuse-values: %w", err)
+	}
+	if len(existing) == 0 {
+		return cliVals, nil
+	}
+	// CoalesceTables merges src into dst, dst wins. CLI is dst so it
+	// overrides the previous release's values exactly like helm does.
+	return chartutil.CoalesceTables(cliVals, existing), nil
+}
+
 // UpgradeDryRun runs `helm upgrade --dry-run` against the live cluster so
 // that `lookup`, post-renderers, and live state participate in the render.
 func (c *Client) UpgradeDryRun(releaseName, chartPath string, opts RenderOptions) ([]byte, error) {
@@ -157,6 +188,8 @@ func (c *Client) UpgradeDryRun(releaseName, chartPath string, opts RenderOptions
 	up.Namespace = c.namespaceFor(opts)
 	up.Devel = opts.Devel
 	up.Version = opts.ChartVersion
+	up.ResetValues = opts.ResetValues
+	up.ReuseValues = opts.ReuseValues
 
 	rel, err := up.Run(releaseName, chart, vals)
 	if err != nil {
@@ -204,6 +237,15 @@ func (c *Client) namespaceFor(opts RenderOptions) string {
 type RenderOptions struct {
 	// Namespace overrides the client-level namespace for this render only.
 	Namespace string
+	// ReuseValues, when true, merges the existing release's stored values
+	// with the CLI-supplied values (CLI wins on conflict). Mirrors
+	// `helm upgrade --reuse-values`.
+	ReuseValues bool
+	// ResetValues, when true, ignores the existing release's stored values
+	// and starts from chart defaults + CLI overrides. Mirrors
+	// `helm upgrade --reset-values`. If both are set, ResetValues wins
+	// (matching helm-diff's behaviour).
+	ResetValues bool
 	// ValueFiles is `-f, --values FILE` (multiple allowed).
 	ValueFiles []string
 	// Set is `--set NAME=VALUE` (multiple allowed).
