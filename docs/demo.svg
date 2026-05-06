@@ -1,0 +1,89 @@
+<svg height="452" width="803.2" xmlns="http://www.w3.org/2000/svg">
+<g transform="translate(32,16)">
+<filter filterUnits="userSpaceOnUse" height="460" id="shadow" width="811.2" x="-32" y="-24">
+<feGaussianBlur stdDeviation="12"/>
+</filter>
+<rect fill="#000000c0" filter="url(#shadow)" height="388" rx="10" ry="10" width="739.2" x="4" y="12"/>
+<rect fill="#282c34" height="388" rx="10" ry="10" width="739.2"/>
+<clipPath id="header">
+<rect height="28" width="739.2"/>
+</clipPath>
+<rect clip-path="url(#header)" fill="#383837" height="56" rx="10" ry="10" width="739.2"/>
+<line stroke="#000000c0" stroke-width="0.5" x1="0" x2="739.2" y1="28" y2="28"/><text dominant-baseline="central" fill="#b3b3b3" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" x="369.6" y="14">helm diffyml upgrade</text>
+<g>
+<circle cx="14" cy="14" fill="#ff5f56" r="6" stroke="#ff5f56" stroke-width="0.5"/>
+<circle cx="34" cy="14" fill="#ffbd2e" r="6" stroke="#ffbd2e" stroke-width="0.5"/>
+<circle cx="54" cy="14" fill="#28c941" r="6" stroke="#28c941" stroke-width="0.5"/>
+</g>
+<svg class="terminal" font-family="JetBrains Mono, Fira Code, Source Code Pro, Cascadia Code, Consolas, Menlo, Monaco, DejaVu Sans Mono, monospace, Symbols Nerd Font Mono, Cascadia Mono" font-size="12" height="360" width="739.2" y="28">
+<svg fill="#dcdfe4" x="9.6" y="7.2">
+<g>
+<svg height="345.6" viewBox="0 0 60 28.8" width="720">
+<g stroke-width="0.025"/>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="0">
+<text xml:space="preserve" y="0.96em"><tspan fill="#56b6c2" font-weight="bold">$</tspan><tspan> </tspan><tspan fill="#dcdfe4">helm </tspan><tspan fill="#dcdfe4">diffyml </tspan><tspan fill="#dcdfe4">upgrade </tspan><tspan fill="#dcdfe4">my-release </tspan><tspan fill="#dcdfe4">./chart </tspan><tspan fill="#dcdfe4">-f </tspan><tspan fill="#dcdfe4">values-changed.yaml </tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="14.4">
+<text xml:space="preserve" y="0.96em"><tspan fill="#dcdfe4" font-weight="bold">stringData.api-key</tspan><tspan>  </tspan><tspan fill="#b0c4de">(v1/Secret/my-release-api)</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="28.8">
+<text xml:space="preserve" y="0.96em"><tspan>  </tspan><tspan fill="#c7c43f">± </tspan><tspan fill="#c7c43f">value </tspan><tspan fill="#c7c43f">change</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="43.2">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#b9311b">- </tspan><tspan fill="#b9311b">***</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="57.6">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#58bf38">+ </tspan><tspan fill="#58bf38">***</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="86.4">
+<text xml:space="preserve" y="0.96em"><tspan fill="#dcdfe4" font-weight="bold">data.greeting</tspan><tspan>  </tspan><tspan fill="#b0c4de">(v1/ConfigMap/my-release-config)</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="100.8">
+<text xml:space="preserve" y="0.96em"><tspan>  </tspan><tspan fill="#c7c43f">± </tspan><tspan fill="#c7c43f">value </tspan><tspan fill="#c7c43f">change</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="115.2">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#b9311b">- </tspan><tspan fill="#b9311b">hello</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="129.6">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#58bf38">+ </tspan><tspan fill="#58bf38">bonjour</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="158.4">
+<text xml:space="preserve" y="0.96em"><tspan fill="#dcdfe4" font-weight="bold">spec.replicas</tspan><tspan>  </tspan><tspan fill="#b0c4de">(apps/v1/Deployment/my-release-web)</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="172.8">
+<text xml:space="preserve" y="0.96em"><tspan>  </tspan><tspan fill="#c7c43f">± </tspan><tspan fill="#c7c43f">value </tspan><tspan fill="#c7c43f">change</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="187.2">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#b9311b">- </tspan><tspan fill="#b9311b">2</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="201.6">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#58bf38">+ </tspan><tspan fill="#58bf38">3</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="230.4">
+<text xml:space="preserve" y="0.96em"><tspan fill="#dcdfe4" font-weight="bold">spec.template.spec.containers.web.image</tspan><tspan>  </tspan><tspan fill="#b0c4de">(apps/v1/Deployment/my-release-web)</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="244.8">
+<text xml:space="preserve" y="0.96em"><tspan>  </tspan><tspan fill="#c7c43f">± </tspan><tspan fill="#c7c43f">value </tspan><tspan fill="#c7c43f">change</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="259.2">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#9c584d">- </tspan><tspan fill="#9c584d">nginx:1.</tspan><tspan fill="#b9311b" font-weight="bold">25</tspan></text>
+</svg>
+<svg height="14.4" overflow="hidden" width="720" y="273.6">
+<text xml:space="preserve" y="0.96em"><tspan>    </tspan><tspan fill="#6c9f5c">+ </tspan><tspan fill="#6c9f5c">nginx:1.</tspan><tspan fill="#58bf38" font-weight="bold">27</tspan></text>
+</svg>
+</g>
+</svg>
+</svg>
+<rect fill="none" height="388" rx="10" ry="10" stroke="#000000" stroke-width="0.5" width="739.2"/>
+<rect fill="none" height="386" rx="9" ry="9" stroke="#f0f0f080" stroke-width="0.5" width="737.2" x="1" y="1"/>
+</g>
+<style>
+@font-face {
+	font-family: JetBrains Mono;
+	font-weight: 100 800;
+	font-style: normal;
+	src: url(https://raw.githubusercontent.com/pamburus/fonts/refs/heads/main/JetBrainsMono/fonts/variable/JetBrainsMono%5Bwght%5D.woff2) format('woff2');
+}
+</style>
+</svg>

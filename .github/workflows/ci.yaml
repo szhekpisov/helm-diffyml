@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go build -trimpath -o bin/helm-diffyml .
+      - run: ./bin/helm-diffyml version
+      - run: go test ./... -race
+
+  install-shell-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Run shellcheck on install hook
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        env:
+          SHELLCHECK_OPTS: "-s sh -S warning"
+        with:
+          severity: warning
+          scandir: "."
+
+  cluster-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.15.0
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          cluster_name: helm-diffyml-ci
+          wait: 60s
+      - name: build binary
+        run: make build
+      - name: helm plugin install
+        run: helm plugin install .
+      - name: cluster smoke test
+        run: sh test/cluster_smoke_test.sh

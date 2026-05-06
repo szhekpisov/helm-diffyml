@@ -1,0 +1,18 @@
+name: "diffyml"
+version: "0.1.0"
+usage: "Structural YAML diff for Helm releases"
+description: |-
+  diffyml is a structural diff tool for YAML files. This plugin embeds it
+  to compare Helm release manifests, with subcommands modeled after helm-diff:
+
+    helm diffyml upgrade  RELEASE CHART          - diff between current release and pending upgrade
+    helm diffyml release  REL_A REL_B            - diff between two live releases
+    helm diffyml revision RELEASE REV_A REV_B    - diff between two revisions of one release
+    helm diffyml rollback RELEASE [REVISION]     - preview a `helm rollback`
+    helm diffyml version                         - print plugin and embedded diffyml versions
+
+  Run "helm diffyml upgrade --help" for full flag documentation.
+command: "$HELM_PLUGIN_DIR/bin/helm-diffyml"
+hooks:
+  install: "$HELM_PLUGIN_DIR/install-binary.sh"
+  update: "$HELM_PLUGIN_DIR/install-binary.sh"

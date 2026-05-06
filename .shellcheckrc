@@ -1,0 +1,4 @@
+shell=sh
+severity=warning
+# Allow `set -- $var` style after eval'd quoted buffers (intentional re-splitting).
+disable=SC2086
