@@ -136,36 +136,43 @@ out="$(HELM_DIFFYML_USE_UPGRADE_DRY_RUN=true helm diffyml upgrade "$RELEASE" "$F
 pass "env-var enables upgrade-dry-run end-to-end"
 
 echo "==> three-way-merge: drift detection"
+# At this point in the test sequence, the release is at revision 2 with
+# values-changed.yaml applied (replicas=3). To isolate *drift* from
+# chart-driven changes we re-render with the same values-changed.yaml so
+# stored manifest and chart agree on every field — anything left in the
+# diff is genuine cluster-side drift.
+#
 # Mutate the live Deployment out-of-band so the cluster diverges from the
-# stored manifest. Two-way diff against the stored manifest won't see this
-# drift; three-way against live state will.
+# stored manifest.
 kubectl scale deployment "${RELEASE}-web" -n "$NAMESPACE" --replicas=7 >/dev/null \
   || fail "kubectl scale to 7 failed"
 
-# Two-way (default): re-rendering the chart with the original values yields
-# replicas=2; helm get manifest also says replicas=2; so default upgrade
-# diff is empty (no drift visible).
-two_way="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values.yaml" -n "$NAMESPACE")" \
+# Two-way (default): re-rendering with values-changed.yaml yields
+# replicas=3; helm get manifest also says replicas=3; so the default
+# upgrade diff is empty — drift on replicas (live=7) is invisible.
+two_way="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE")" \
   || fail "two-way upgrade exited non-zero"
 case "$two_way" in
   *replicas*) fail "two-way diff should NOT show drift, got: $two_way" ;;
   *)          pass "two-way diff is empty (drift not visible — expected)" ;;
 esac
 
-# Three-way: live state has replicas=7, projected has replicas=2, so the
-# diff should mention replicas going 7 → 2.
-three_way="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values.yaml" -n "$NAMESPACE" --three-way-merge)" \
+# Three-way: live state has replicas=7, projected has replicas=3, so the
+# diff should mention replicas going 7 → 3.
+three_way="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" --three-way-merge)" \
   || fail "three-way upgrade exited non-zero"
 case "$three_way" in
-  *replicas*7*) pass "three-way diff surfaces drift (replicas 7→2)" ;;
-  *)            fail "three-way diff should show the 7→2 drift, got: $three_way" ;;
+  *replicas*7*) pass "three-way diff surfaces drift (replicas 7→3)" ;;
+  *)            fail "three-way diff should show the 7→3 drift, got: $three_way" ;;
 esac
 
 # Compose with --use-upgrade-dry-run for parity check (still detects drift).
-combo="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values.yaml" -n "$NAMESPACE" --three-way-merge --use-upgrade-dry-run)" \
+combo="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" --three-way-merge --use-upgrade-dry-run)" \
   || fail "three-way + use-upgrade-dry-run exited non-zero"
-[ -n "$combo" ] || fail "three-way + use-upgrade-dry-run produced empty output"
-pass "three-way composes with --use-upgrade-dry-run"
+case "$combo" in
+  *replicas*7*) pass "three-way composes with --use-upgrade-dry-run" ;;
+  *)            fail "three-way + use-upgrade-dry-run should also surface drift, got: $combo" ;;
+esac
 
 echo
 echo "All cluster smoke checks passed."
