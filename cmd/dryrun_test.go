@@ -64,6 +64,52 @@ func TestUpgradeDryRunNoUseOverridesEnv(t *testing.T) {
 	}
 }
 
+func TestUpgradeDryRunThreeWayFlag(t *testing.T) {
+	out, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge", "--dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "three-way-merge against live cluster state") {
+		t.Errorf("--three-way-merge should appear in plan, got:\n%s", out)
+	}
+	if !strings.Contains(out, "target via helm template") {
+		t.Errorf("default three-way-merge target should be helm template, got:\n%s", out)
+	}
+}
+
+func TestUpgradeDryRunThreeWayWithUseUpgradeDryRun(t *testing.T) {
+	out, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart",
+		"--three-way-merge", "--use-upgrade-dry-run", "--dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "target via helm upgrade --dry-run") {
+		t.Errorf("composing three-way-merge with --use-upgrade-dry-run should swap target render, got:\n%s", out)
+	}
+}
+
+func TestUpgradeDryRunThreeWayEnv(t *testing.T) {
+	t.Setenv("HELM_DIFFYML_THREE_WAY_MERGE", "true")
+	out, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "three-way-merge against live cluster state") {
+		t.Errorf("env should enable three-way-merge, got:\n%s", out)
+	}
+}
+
+func TestUpgradeDryRunNoThreeWayOverridesEnv(t *testing.T) {
+	t.Setenv("HELM_DIFFYML_THREE_WAY_MERGE", "true")
+	out, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--no-three-way-merge", "--dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "three-way-merge") {
+		t.Errorf("--no-three-way-merge should override env, got:\n%s", out)
+	}
+}
+
 func TestReleaseDryRun(t *testing.T) {
 	out, _, err := runSubcommand(t, "release", "rel-a", "rel-b", "--dry-run")
 	if err != nil {

@@ -3,9 +3,13 @@ module github.com/szhekpisov/helm-diffyml
 go 1.26.2
 
 require (
+	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/spf13/cobra v1.10.2
 	github.com/szhekpisov/diffyml v1.6.0
 	helm.sh/helm/v3 v3.20.2
+	k8s.io/apimachinery v0.35.1
+	k8s.io/cli-runtime v0.35.1
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -100,9 +104,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.35.1 // indirect
 	k8s.io/apiextensions-apiserver v0.35.1 // indirect
-	k8s.io/apimachinery v0.35.1 // indirect
 	k8s.io/apiserver v0.35.1 // indirect
-	k8s.io/cli-runtime v0.35.1 // indirect
 	k8s.io/client-go v0.35.1 // indirect
 	k8s.io/component-base v0.35.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
@@ -115,5 +117,4 @@ require (
 	sigs.k8s.io/kustomize/kyaml v0.20.1 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 )

@@ -95,6 +95,7 @@ and `rollback` subcommands only need `-n, --namespace`.
 | `--exit-code` | Exit 1 on differences (mirrors `helm-diff --detailed-exitcode`) |
 | `--dry-run` | Print the constructed `diffyml` command and exit 0 |
 | `--use-upgrade-dry-run` *(`upgrade` only)* | Source B uses `helm upgrade --dry-run --output yaml` instead of `helm template` (high-fidelity preview that honours `lookup`, post-renderers, live cluster state). Falls back to `helm install --dry-run` when the release does not yet exist. Toggle the default with `HELM_DIFFYML_USE_UPGRADE_DRY_RUN=true`; `--no-use-upgrade-dry-run` overrides the env var on a single call. |
+| `--three-way-merge` *(`upgrade` only)* | Diff against **live cluster state** instead of the stored manifest, computing a JSON-merge three-way patch per resource (helm-diff-style). Catches out-of-band drift like `kubectl edit`, controller-applied mutations, and admission-webhook-injected fields that `helm get manifest` doesn't see. Composes with `--use-upgrade-dry-run` for the target side. Toggle with `HELM_DIFFYML_THREE_WAY_MERGE=true`; `--no-three-way-merge` overrides per call. |
 
 > The plugin owns `--no-*` flags. Do not pass `--no-neat` through the `--` escape
 > hatch — `diffyml` itself has no `--no-neat`, only `--neat`.
@@ -135,6 +136,10 @@ flip that.
   `--use-upgrade-dry-run` (or set `HELM_DIFFYML_USE_UPGRADE_DRY_RUN=true`) so
   source B comes from `helm upgrade --dry-run` instead, which honours `lookup`,
   post-renderers, and live cluster state.
+- **Three-way merge uses JSON merge patch only.** Strategic-merge-patch (which
+  understands list-merge keys for native types like `Deployment.spec.template.
+  spec.containers`) is on the v0.3 polish backlog. JSON merge is correct for
+  scalars and CRDs but can produce coarser diffs for arrays of pods/containers.
 - **Color in pipes.** `diffyml --color auto` correctly disables color when
   stdout isn't a TTY. For `| less -R`, pass `-- --color always`.
 

@@ -34,6 +34,9 @@ func newUpgradeCmd() *cobra.Command {
 
 		useUpgradeDryRun   bool
 		noUseUpgradeDryRun bool
+
+		threeWayMerge   bool
+		noThreeWayMerge bool
 	)
 
 	cmd := &cobra.Command{
@@ -59,6 +62,14 @@ install --dry-run as the fallback for missing releases).`,
 				useDryRun = false
 			}
 
+			useThreeWay := envFlagTrue("HELM_DIFFYML_THREE_WAY_MERGE")
+			if cmd.Flags().Changed("three-way-merge") {
+				useThreeWay = threeWayMerge
+			}
+			if noThreeWayMerge {
+				useThreeWay = false
+			}
+
 			client, err := helmclient.New(namespace, kubeContext, false)
 			if err != nil {
 				return err
@@ -77,32 +88,41 @@ install --dry-run as the fallback for missing releases).`,
 			// Plugin --dry-run: print the plan without contacting the
 			// cluster, mirroring the shell behaviour.
 			if dryRunPlugin {
-				return printUpgradePlan(cmd, release, chartPath, useDryRun, renderOpts, output)
+				return printUpgradePlan(cmd, release, chartPath, useDryRun, useThreeWay, renderOpts, output)
 			}
 
-			// Source A.
-			from, err := client.GetManifest(release, 0)
-			if err != nil {
-				return fmt.Errorf("helm get manifest %s: %w", release, err)
-			}
-
-			// Source B: branch on --use-upgrade-dry-run.
-			var to []byte
+			var from, to []byte
 			switch {
-			case useDryRun && len(from) == 0:
-				to, err = client.InstallDryRun(release, chartPath, renderOpts)
+			case useThreeWay:
+				// Source A becomes the live cluster state for each
+				// resource; Source B is the live state with the new chart
+				// applied via three-way JSON merge patch. Composes with
+				// --use-upgrade-dry-run for the modified-side render.
+				from, to, err = client.ThreeWayMerged(release, chartPath, renderOpts, useDryRun)
 				if err != nil {
-					return fmt.Errorf("helm install --dry-run %s: %w", release, err)
-				}
-			case useDryRun:
-				to, err = client.UpgradeDryRun(release, chartPath, renderOpts)
-				if err != nil {
-					return fmt.Errorf("helm upgrade --dry-run %s: %w", release, err)
+					return fmt.Errorf("three-way merge for %s: %w", release, err)
 				}
 			default:
-				to, err = client.Template(release, chartPath, renderOpts)
+				from, err = client.GetManifest(release, 0)
 				if err != nil {
-					return fmt.Errorf("helm template %s: %w", release, err)
+					return fmt.Errorf("helm get manifest %s: %w", release, err)
+				}
+				switch {
+				case useDryRun && len(from) == 0:
+					to, err = client.InstallDryRun(release, chartPath, renderOpts)
+					if err != nil {
+						return fmt.Errorf("helm install --dry-run %s: %w", release, err)
+					}
+				case useDryRun:
+					to, err = client.UpgradeDryRun(release, chartPath, renderOpts)
+					if err != nil {
+						return fmt.Errorf("helm upgrade --dry-run %s: %w", release, err)
+					}
+				default:
+					to, err = client.Template(release, chartPath, renderOpts)
+					if err != nil {
+						return fmt.Errorf("helm template %s: %w", release, err)
+					}
 				}
 			}
 
@@ -142,6 +162,9 @@ install --dry-run as the fallback for missing releases).`,
 	f.BoolVar(&useUpgradeDryRun, "use-upgrade-dry-run", false, "use helm upgrade --dry-run instead of helm template for source B")
 	f.BoolVar(&noUseUpgradeDryRun, "no-use-upgrade-dry-run", false, "override HELM_DIFFYML_USE_UPGRADE_DRY_RUN=true on a single call")
 
+	f.BoolVar(&threeWayMerge, "three-way-merge", false, "diff against live cluster state (catches out-of-band drift); composes with --use-upgrade-dry-run")
+	f.BoolVar(&noThreeWayMerge, "no-three-way-merge", false, "override HELM_DIFFYML_THREE_WAY_MERGE=true on a single call")
+
 	return cmd
 }
 
@@ -167,13 +190,19 @@ func extractDiffymlExtraArgs(cmd *cobra.Command) []string {
 	return nil
 }
 
-func printUpgradePlan(cmd *cobra.Command, release, chartPath string, useDryRun bool, opts helmclient.RenderOptions, output string) error {
+func printUpgradePlan(cmd *cobra.Command, release, chartPath string, useDryRun, useThreeWay bool, opts helmclient.RenderOptions, output string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "# helm-diffyml dry-run")
-	fmt.Fprintf(out, "# from: helm get manifest %s\n", release)
-	if useDryRun {
+	switch {
+	case useThreeWay && useDryRun:
+		fmt.Fprintf(out, "# mode: three-way-merge against live cluster state (target via helm upgrade --dry-run)\n")
+	case useThreeWay:
+		fmt.Fprintf(out, "# mode: three-way-merge against live cluster state (target via helm template)\n")
+	case useDryRun:
+		fmt.Fprintf(out, "# from: helm get manifest %s\n", release)
 		fmt.Fprintf(out, "# to:   helm upgrade %s %s --dry-run --output yaml (or helm install --dry-run for missing releases)\n", release, chartPath)
-	} else {
+	default:
+		fmt.Fprintf(out, "# from: helm get manifest %s\n", release)
 		fmt.Fprintf(out, "# to:   helm template %s %s\n", release, chartPath)
 	}
 	fmt.Fprintf(out, "# diff: diffyml --output %s [%s]\n", output, summariseRender(opts))
