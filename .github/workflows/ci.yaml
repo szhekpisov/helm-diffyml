@@ -21,7 +21,17 @@ jobs:
       - run: go vet ./...
       - run: go build -trimpath -o bin/helm-diffyml .
       - run: ./bin/helm-diffyml version
-      - run: go test ./... -race
+      - name: Test with coverage
+        run: go test ./... -race -coverprofile=coverage.out -coverpkg=./...
+      - name: Enforce ≥80% coverage
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%",""); print $3}')
+          echo "total coverage: ${pct}%"
+          awk -v p="$pct" 'BEGIN { exit !(p+0 >= 80) }' || {
+            echo "::error::coverage ${pct}% is below the 80% threshold"
+            go tool cover -func=coverage.out | awk '$3 == "0.0%" || ($3+0) < 50'
+            exit 1
+          }
 
   install-shell-lint:
     runs-on: ubuntu-latest

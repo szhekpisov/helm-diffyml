@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/szhekpisov/helm-diffyml/internal/diff"
-	"github.com/szhekpisov/helm-diffyml/internal/helmclient"
 )
 
 func newReleaseCmd() *cobra.Command {
@@ -39,7 +37,7 @@ func newReleaseCmd() *cobra.Command {
 				return nil
 			}
 
-			client, err := helmclient.New(namespace, kubeContext, false)
+			client, err := newClient(namespace, kubeContext, false)
 			if err != nil {
 				return err
 			}
@@ -68,7 +66,7 @@ func newReleaseCmd() *cobra.Command {
 			opts.Extra = extractDiffymlExtraArgs(cmd)
 
 			code, runErr := diff.Run(from, to, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
-			os.Exit(code)
+			osExit(code)
 			return runErr
 		},
 	}

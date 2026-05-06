@@ -60,6 +60,14 @@ func New(namespace, kubeContext string, debug bool) (*Client, error) {
 // settings.Namespace() etc).
 func (c *Client) Settings() *cli.EnvSettings { return c.settings }
 
+// NewWithConfig is the test seam: build a Client from a pre-constructed
+// action.Configuration (e.g. wired to driver.NewMemory + a fake KubeClient).
+// Production code should use New() — this constructor is for unit tests
+// that want to drive helmclient methods without touching a real cluster.
+func NewWithConfig(settings *cli.EnvSettings, cfg *action.Configuration) *Client {
+	return &Client{settings: settings, cfg: cfg}
+}
+
 // GetManifest fetches the stored manifest of name. revision==0 ⇒ latest.
 // Returns (nil, nil) when the release does not exist (so callers can treat
 // "not found" as an empty Source A in the upgrade subcommand).

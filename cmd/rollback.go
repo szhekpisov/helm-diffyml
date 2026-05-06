@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/szhekpisov/helm-diffyml/internal/diff"
-	"github.com/szhekpisov/helm-diffyml/internal/helmclient"
 )
 
 func newRollbackCmd() *cobra.Command {
@@ -42,7 +40,7 @@ previous revision is used (matches the default of helm rollback).`,
 				revision = r
 			}
 
-			client, err := helmclient.New(namespace, kubeContext, false)
+			client, err := newClient(namespace, kubeContext, false)
 			if err != nil {
 				return err
 			}
@@ -91,7 +89,7 @@ previous revision is used (matches the default of helm rollback).`,
 			opts.Extra = extractDiffymlExtraArgs(cmd)
 
 			code, runErr := diff.Run(from, to, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
-			os.Exit(code)
+			osExit(code)
 			return runErr
 		},
 	}

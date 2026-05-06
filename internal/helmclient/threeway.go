@@ -48,10 +48,13 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 		return nil, nil, err
 	}
 
-	dyn, mapper, err := c.dynamicLookup()
-	if err != nil {
-		return nil, nil, fmt.Errorf("build dynamic client: %w", err)
-	}
+	// Lazy: only build the dynamic client when there's at least one object
+	// to look up. Empty charts therefore don't require a reachable cluster.
+	var (
+		dyn       dynamic.Interface
+		mapper    meta.RESTMapper
+		dynBuilt  bool
+	)
 
 	debug := os.Getenv("HELM_DIFFYML_DEBUG_3WAY") != ""
 	if debug {
@@ -65,6 +68,13 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 			return nil, nil, fmt.Errorf("encode rendered %s: %w", objKey(obj), err)
 		}
 
+		if !dynBuilt {
+			d, m, derr := c.dynamicLookup()
+			if derr != nil {
+				return nil, nil, fmt.Errorf("build dynamic client: %w", derr)
+			}
+			dyn, mapper, dynBuilt = d, m, true
+		}
 		liveObj, err := getLive(context.TODO(), dyn, mapper, obj, c.namespaceFor(opts))
 		if err != nil {
 			if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {

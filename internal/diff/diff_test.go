@@ -98,3 +98,29 @@ func TestSafeRunBothNil(t *testing.T) {
 		t.Errorf("expected exit 0 for empty-vs-empty, got %d", code)
 	}
 }
+
+// TestStderrErr exercises the stderr-as-error wrapper used by SafeRun when
+// diffyml writes a non-fatal warning to stderr but still returns success.
+func TestStderrErr(t *testing.T) {
+	err := bytesAsError([]byte("oops"))
+	if err == nil {
+		t.Fatal("bytesAsError returned nil")
+	}
+	if err.Error() != "oops" {
+		t.Errorf("Error() = %q, want %q", err.Error(), "oops")
+	}
+}
+
+// TestRunInvalidExtraArg exercises the ParseArgs error path: a malformed
+// diffyml flag in opts.Extra should surface as ExitCodeError.
+func TestRunInvalidExtraArg(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Extra = []string{"--this-flag-does-not-exist"}
+	_, code, err := SafeRun([]byte(fixtureA), []byte(fixtureB), opts)
+	if err == nil {
+		t.Fatal("expected ParseArgs error")
+	}
+	if code != 255 {
+		t.Errorf("expected ExitCodeError=255 on bad arg, got %d", code)
+	}
+}
