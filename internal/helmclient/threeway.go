@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
@@ -97,6 +98,14 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 		return appendYAML(&projectedStream, projectedJSON, &liveStream, liveJSON)
 	}); err != nil {
 		return nil, nil, err
+	}
+
+	if os.Getenv("HELM_DIFFYML_DEBUG_3WAY") != "" {
+		fmt.Fprintf(os.Stderr, "--- HELM_DIFFYML_DEBUG_3WAY: live stream (%d bytes) ---\n", liveStream.Len())
+		_, _ = os.Stderr.Write(liveStream.Bytes())
+		fmt.Fprintf(os.Stderr, "\n--- HELM_DIFFYML_DEBUG_3WAY: projected stream (%d bytes) ---\n", projectedStream.Len())
+		_, _ = os.Stderr.Write(projectedStream.Bytes())
+		fmt.Fprintln(os.Stderr, "\n--- end debug ---")
 	}
 
 	return liveStream.Bytes(), projectedStream.Bytes(), nil

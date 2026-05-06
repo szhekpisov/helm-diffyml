@@ -171,6 +171,14 @@ case "$three_way" in
     echo "  diagnostic: three-way diff with --no-neat --no-mask-secrets --no-omit-header:"
     helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" \
       --three-way-merge --no-neat --no-mask-secrets --no-omit-header >&2 || true
+    echo
+    echo "  diagnostic: raw three-way streams (HELM_DIFFYML_DEBUG_3WAY=1):"
+    HELM_DIFFYML_DEBUG_3WAY=1 helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" \
+      --three-way-merge --no-neat --no-mask-secrets --no-omit-header >/dev/null 2>&1 \
+      | head -200 >&2 || true
+    HELM_DIFFYML_DEBUG_3WAY=1 helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" \
+      --three-way-merge --no-neat --no-mask-secrets --no-omit-header 2>&1 >/dev/null \
+      | head -200 >&2 || true
     fail "three-way diff should show the 7→3 drift, got: $three_way"
     ;;
 esac
