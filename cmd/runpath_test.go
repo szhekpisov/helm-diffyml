@@ -71,9 +71,7 @@ func withFakes(t *testing.T, fr *fakeRenderer) *int {
 		newClient = prevClient
 		osExit = prevExit
 	})
-	stub := func(string, string, bool) (helmclient.Renderer, error) { return fr, nil }
-	newClient = stub
-	t.Logf("withFakes: newClient stub installed (addr=%p, prev=%p)", stub, prevClient)
+	newClient = func(string, string, bool) (helmclient.Renderer, error) { return fr, nil }
 	captured := -1
 	osExit = func(code int) { captured = code }
 	return &captured
