@@ -2,6 +2,7 @@ package helmclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,13 +11,13 @@ import (
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
-	"helm.sh/helm/v3/pkg/release"
-	"k8s.io/apimachinery/pkg/api/meta"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
-	"k8s.io/cli-runtime/pkg/resource"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 )
 
@@ -30,15 +31,14 @@ const lastAppliedAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
 //
 // Resources that don't yet exist in the cluster contribute a pure addition
 // (live = empty, projected = rendered manifest). The reverse case (resources
-// removed from the chart but still in the cluster) is not handled here yet;
-// helm-diff parity for that path is on the v0.3 backlog.
+// removed from the chart but still in the cluster) is not handled here yet.
 func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOptions, useUpgradeDryRun bool) ([]byte, []byte, error) {
 	rendered, err := c.renderForThreeWay(releaseName, chartPath, opts, useUpgradeDryRun)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	resources, err := c.cfg.KubeClient.Build(bytes.NewReader(rendered), false)
+	objs, err := splitYAMLToUnstructured(rendered)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse rendered chart: %w", err)
 	}
@@ -48,59 +48,77 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 		return nil, nil, err
 	}
 
+	dyn, mapper, err := c.dynamicLookup()
+	if err != nil {
+		return nil, nil, fmt.Errorf("build dynamic client: %w", err)
+	}
+
+	debug := os.Getenv("HELM_DIFFYML_DEBUG_3WAY") != ""
+	if debug {
+		fmt.Fprintf(os.Stderr, "--- HELM_DIFFYML_DEBUG_3WAY: rendered chart (%d bytes) parsed into %d objects ---\n", len(rendered), len(objs))
+	}
+
 	var liveStream, projectedStream bytes.Buffer
-	if err := resources.Visit(func(info *resource.Info, vErr error) error {
-		if vErr != nil {
-			return vErr
-		}
-
-		modifiedJSON, err := runtime.Encode(unstructuredJSONEncoder{}, info.Object)
+	for _, obj := range objs {
+		modifiedJSON, err := obj.MarshalJSON()
 		if err != nil {
-			return fmt.Errorf("encode rendered %s: %w", resourceKey(info), err)
+			return nil, nil, fmt.Errorf("encode rendered %s: %w", objKey(obj), err)
 		}
 
-		liveJSON, err := getLiveJSON(info)
+		liveObj, err := getLive(context.TODO(), dyn, mapper, obj, c.namespaceFor(opts))
 		if err != nil {
 			if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
-				return fmt.Errorf("get live %s: %w", resourceKey(info), err)
+				return nil, nil, fmt.Errorf("get live %s: %w", objKey(obj), err)
 			}
-			// Not found → pure addition.
-			return appendYAML(&projectedStream, modifiedJSON, &liveStream, nil)
+			if debug {
+				fmt.Fprintf(os.Stderr, "  %s: not found in cluster (pure addition)\n", objKey(obj))
+			}
+			if err := writeJSONAsYAMLDoc(&projectedStream, modifiedJSON); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+		liveJSON, err := liveObj.MarshalJSON()
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode live %s: %w", objKey(obj), err)
 		}
 
-		// Determine "original" (last-applied). Prefer the kubectl annotation;
-		// fall back to the release-stored manifest for that key.
 		originalJSON := lastAppliedFromLive(liveJSON)
 		if len(originalJSON) == 0 {
-			if stored, ok := storedManifest[resourceKey(info)]; ok {
+			if stored, ok := storedManifest[objKey(obj)]; ok {
 				originalJSON, err = yaml.YAMLToJSON([]byte(stored))
 				if err != nil {
-					return fmt.Errorf("convert stored manifest for %s: %w", resourceKey(info), err)
+					return nil, nil, fmt.Errorf("convert stored manifest for %s: %w", objKey(obj), err)
 				}
 			}
 		}
-		// If still empty, fall back to using the modified manifest as original
-		// — equivalent to helm-diff's behaviour when no last-applied is found.
 		if len(originalJSON) == 0 {
 			originalJSON = modifiedJSON
 		}
 
 		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(originalJSON, modifiedJSON, liveJSON)
 		if err != nil {
-			return fmt.Errorf("compute three-way patch for %s: %w", resourceKey(info), err)
+			return nil, nil, fmt.Errorf("compute three-way patch for %s: %w", objKey(obj), err)
 		}
 
 		projectedJSON, err := jsonpatch.MergePatch(liveJSON, patch)
 		if err != nil {
-			return fmt.Errorf("apply three-way patch for %s: %w", resourceKey(info), err)
+			return nil, nil, fmt.Errorf("apply three-way patch for %s: %w", objKey(obj), err)
 		}
 
-		return appendYAML(&projectedStream, projectedJSON, &liveStream, liveJSON)
-	}); err != nil {
-		return nil, nil, err
+		if debug {
+			fmt.Fprintf(os.Stderr, "  %s: patch=%s\n", objKey(obj), shortPatch(patch))
+		}
+
+		if err := writeJSONAsYAMLDoc(&liveStream, liveJSON); err != nil {
+			return nil, nil, err
+		}
+		if err := writeJSONAsYAMLDoc(&projectedStream, projectedJSON); err != nil {
+			return nil, nil, err
+		}
 	}
 
-	if os.Getenv("HELM_DIFFYML_DEBUG_3WAY") != "" {
+	if debug {
 		fmt.Fprintf(os.Stderr, "--- HELM_DIFFYML_DEBUG_3WAY: live stream (%d bytes) ---\n", liveStream.Len())
 		_, _ = os.Stderr.Write(liveStream.Bytes())
 		fmt.Fprintf(os.Stderr, "\n--- HELM_DIFFYML_DEBUG_3WAY: projected stream (%d bytes) ---\n", projectedStream.Len())
@@ -113,14 +131,10 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 
 // renderForThreeWay produces the modified-side YAML — either via helm
 // template (default) or helm upgrade --dry-run when the user opted in.
-// Mirrors the source-B branching in cmd/upgrade.go so --three-way-merge
-// composes with --use-upgrade-dry-run.
 func (c *Client) renderForThreeWay(releaseName, chartPath string, opts RenderOptions, useUpgradeDryRun bool) ([]byte, error) {
 	if !useUpgradeDryRun {
 		return c.Template(releaseName, chartPath, opts)
 	}
-	// For three-way against a not-yet-installed release, fall back to install
-	// --dry-run; otherwise upgrade --dry-run.
 	manifest, err := c.GetManifest(releaseName, 0)
 	if err != nil {
 		return nil, err
@@ -131,10 +145,73 @@ func (c *Client) renderForThreeWay(releaseName, chartPath string, opts RenderOpt
 	return c.UpgradeDryRun(releaseName, chartPath, opts)
 }
 
+// dynamicLookup returns a dynamic.Interface and a RESTMapper built from the
+// same RESTClientGetter the helm action.Configuration uses.
+func (c *Client) dynamicLookup() (dynamic.Interface, meta.RESTMapper, error) {
+	getter := c.settings.RESTClientGetter()
+	rc, err := getter.ToRESTConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	mapper, err := getter.ToRESTMapper()
+	if err != nil {
+		return nil, nil, err
+	}
+	dyn, err := dynamic.NewForConfig(rc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return dyn, mapper, nil
+}
+
+// getLive fetches the live cluster object matching obj's GVK + namespace + name.
+// fallbackNamespace is used when the rendered manifest doesn't carry an
+// explicit metadata.namespace (which is the common case — helm injects it
+// from the install context).
+func getLive(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper, obj *unstructured.Unstructured, fallbackNamespace string) (*unstructured.Unstructured, error) {
+	gvk := obj.GroupVersionKind()
+	mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return nil, err
+	}
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+	if namespace == "" {
+		namespace = fallbackNamespace
+	}
+	var ri dynamic.ResourceInterface
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		ri = dyn.Resource(mapping.Resource).Namespace(namespace)
+	} else {
+		ri = dyn.Resource(mapping.Resource)
+	}
+	return ri.Get(ctx, name, metav1.GetOptions{})
+}
+
+// splitYAMLToUnstructured parses a multi-doc YAML stream into typed
+// unstructured objects. Skips empty documents.
+func splitYAMLToUnstructured(in []byte) ([]*unstructured.Unstructured, error) {
+	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(in), 4096)
+	var out []*unstructured.Unstructured
+	for {
+		raw := map[string]interface{}{}
+		if err := dec.Decode(&raw); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if len(raw) == 0 {
+			continue
+		}
+		out = append(out, &unstructured.Unstructured{Object: raw})
+	}
+	return out, nil
+}
+
 // storedManifestByKey returns the helm-stored manifest, indexed by
 // "kind/namespace/name". Used as the fallback "original" when a live object
-// has no kubectl last-applied annotation (helm-managed resources frequently
-// don't carry it).
+// has no kubectl last-applied annotation.
 func (c *Client) storedManifestByKey(releaseName string) (map[string]string, error) {
 	manifest, err := c.GetManifest(releaseName, 0)
 	if err != nil {
@@ -148,16 +225,16 @@ func (c *Client) storedManifestByKey(releaseName string) (map[string]string, err
 	for _, doc := range docs {
 		key, err := keyFromYAMLDoc(doc)
 		if err != nil {
-			continue // skip docs we can't index — they just won't have a fallback
+			continue
 		}
 		out[key] = doc
 	}
 	return out, nil
 }
 
-func resourceKey(info *resource.Info) string {
-	gvk := info.Object.GetObjectKind().GroupVersionKind()
-	return strings.ToLower(gvk.Kind) + "/" + info.Namespace + "/" + info.Name
+func objKey(obj *unstructured.Unstructured) string {
+	gvk := obj.GroupVersionKind()
+	return strings.ToLower(gvk.Kind) + "/" + obj.GetNamespace() + "/" + obj.GetName()
 }
 
 func keyFromYAMLDoc(doc string) (string, error) {
@@ -184,20 +261,8 @@ func splitYAMLDocs(s string) []string {
 	return out
 }
 
-// getLiveJSON fetches the live cluster object via the resource.Helper and
-// returns its JSON encoding (which is what the patch packages consume).
-func getLiveJSON(info *resource.Info) ([]byte, error) {
-	helper := resource.NewHelper(info.Client, info.Mapping)
-	live, err := helper.Get(info.Namespace, info.Name)
-	if err != nil {
-		return nil, err
-	}
-	return runtime.Encode(unstructuredJSONEncoder{}, live)
-}
-
 // lastAppliedFromLive extracts the kubectl-style last-applied annotation if
-// present. Helm-managed resources usually lack it but kubectl-managed ones
-// have it.
+// present.
 func lastAppliedFromLive(liveJSON []byte) []byte {
 	var u unstructured.Unstructured
 	if err := json.Unmarshal(liveJSON, &u.Object); err != nil {
@@ -208,23 +273,6 @@ func lastAppliedFromLive(liveJSON []byte) []byte {
 		return nil
 	}
 	return []byte(v)
-}
-
-// appendYAML writes both live and projected JSON to their respective
-// concatenated YAML streams. Either argument may be nil to emit an empty
-// document for that side.
-func appendYAML(projectedStream io.Writer, projectedJSON []byte, liveStream io.Writer, liveJSON []byte) error {
-	if liveJSON != nil {
-		if err := writeJSONAsYAMLDoc(liveStream, liveJSON); err != nil {
-			return err
-		}
-	}
-	if projectedJSON != nil {
-		if err := writeJSONAsYAMLDoc(projectedStream, projectedJSON); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func writeJSONAsYAMLDoc(w io.Writer, in []byte) error {
@@ -239,32 +287,10 @@ func writeJSONAsYAMLDoc(w io.Writer, in []byte) error {
 	return err
 }
 
-// unstructuredJSONEncoder serializes any runtime.Object to its JSON form by
-// going through unstructured. Avoids needing the typed scheme to know about
-// the GVK (works for CRDs and custom types).
-type unstructuredJSONEncoder struct{}
-
-func (unstructuredJSONEncoder) Encode(obj runtime.Object, w io.Writer) error {
-	if u, ok := obj.(runtime.Unstructured); ok {
-		return json.NewEncoder(w).Encode(u.UnstructuredContent())
+func shortPatch(p []byte) string {
+	if len(p) <= 200 {
+		return string(p)
 	}
-	// runtime.DefaultUnstructuredConverter via apimachinery knows how to
-	// flatten structured types too.
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-	if err != nil {
-		return err
-	}
-	return json.NewEncoder(w).Encode(m)
+	return string(p[:200]) + "...(truncated)"
 }
 
-// Identifier is required by runtime.Encoder.
-func (unstructuredJSONEncoder) Identifier() runtime.Identifier {
-	return runtime.Identifier("helm-diffyml/unstructured-json")
-}
-
-// Compile-time assertion: we conform to the runtime.Encoder interface.
-var _ runtime.Encoder = unstructuredJSONEncoder{}
-
-// Sanity: ensure release.Release is referenced so the import isn't dropped
-// when the file gets lints-only changes later.
-var _ = (*release.Release)(nil)
