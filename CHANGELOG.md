@@ -10,10 +10,13 @@ Each plugin tag pins a specific `diffyml` version (embedded as a Go library).
 
 ### Added
 - `helm diffyml upgrade --three-way-merge` (env: `HELM_DIFFYML_THREE_WAY_MERGE`)
-  — diff against live cluster state via three-way JSON merge patch per
-  resource. Catches out-of-band drift (`kubectl edit`, controller mutations,
+  — diff against live cluster state via three-way merge per resource.
+  Catches out-of-band drift (`kubectl edit`, controller mutations,
   admission webhooks) that the default two-way `helm get manifest` path
-  cannot see. Composes with `--use-upgrade-dry-run`.
+  cannot see. Native Kubernetes types use strategic-merge-patch (so
+  array fields like `containers` merge by `name` instead of being
+  replaced wholesale); CRDs fall back to JSON merge. Composes with
+  `--use-upgrade-dry-run`.
 
 ## [0.1.0]
 

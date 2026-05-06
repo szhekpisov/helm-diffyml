@@ -15,9 +15,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/yaml"
 )
 
@@ -106,14 +109,9 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 			originalJSON = modifiedJSON
 		}
 
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(originalJSON, modifiedJSON, liveJSON)
+		patch, projectedJSON, err := computeThreeWay(obj.GroupVersionKind(), originalJSON, modifiedJSON, liveJSON)
 		if err != nil {
-			return nil, nil, fmt.Errorf("compute three-way patch for %s: %w", objKey(obj), err)
-		}
-
-		projectedJSON, err := jsonpatch.MergePatch(liveJSON, patch)
-		if err != nil {
-			return nil, nil, fmt.Errorf("apply three-way patch for %s: %w", objKey(obj), err)
+			return nil, nil, fmt.Errorf("three-way patch for %s: %w", objKey(obj), err)
 		}
 
 		if debug {
@@ -137,6 +135,42 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 	}
 
 	return liveStream.Bytes(), projectedStream.Bytes(), nil
+}
+
+// computeThreeWay produces (patch, projected) for one resource. Native
+// Kubernetes types resolve through k8s.io/kubectl/pkg/scheme so we use
+// strategic-merge-patch (which honours `patchStrategy: merge` and
+// `patchMergeKey` annotations on fields like `containers` so arrays merge
+// by key instead of being replaced wholesale). Unregistered types (CRDs,
+// resources from API groups the scheme doesn't know about) fall through
+// to JSON merge patch, matching helm-diff's behaviour.
+func computeThreeWay(gvk schema.GroupVersionKind, original, modified, live []byte) ([]byte, []byte, error) {
+	if dataStruct, err := scheme.Scheme.New(gvk); err == nil {
+		if lookup, lerr := strategicpatch.NewPatchMetaFromStruct(dataStruct); lerr == nil {
+			// overwrite=true matches helm upgrade's default reconcile
+			// semantics: chart values override out-of-band drift on
+			// conflict. With overwrite=false the strategic patcher
+			// refuses any divergence between live and modified that
+			// wasn't intentionally chart-driven, which forces every
+			// helm-managed resource down the JSON merge fallback.
+			if patch, perr := strategicpatch.CreateThreeWayMergePatch(original, modified, live, lookup, true); perr == nil {
+				if projected, aerr := strategicpatch.StrategicMergePatch(live, patch, dataStruct); aerr == nil {
+					return patch, projected, nil
+				}
+			}
+		}
+	}
+	// CRDs / types unknown to k8s.io/kubectl/pkg/scheme fall through to
+	// JSON merge, matching helm-diff's behaviour.
+	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(original, modified, live)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compute json-merge patch: %w", err)
+	}
+	projected, err := jsonpatch.MergePatch(live, patch)
+	if err != nil {
+		return nil, nil, fmt.Errorf("apply json-merge patch: %w", err)
+	}
+	return patch, projected, nil
 }
 
 // renderForThreeWay produces the modified-side YAML — either via helm

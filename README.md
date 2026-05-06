@@ -136,10 +136,12 @@ flip that.
   `--use-upgrade-dry-run` (or set `HELM_DIFFYML_USE_UPGRADE_DRY_RUN=true`) so
   source B comes from `helm upgrade --dry-run` instead, which honours `lookup`,
   post-renderers, and live cluster state.
-- **Three-way merge uses JSON merge patch only.** Strategic-merge-patch (which
-  understands list-merge keys for native types like `Deployment.spec.template.
-  spec.containers`) is on the v0.3 polish backlog. JSON merge is correct for
-  scalars and CRDs but can produce coarser diffs for arrays of pods/containers.
+- **Three-way merge for native Kubernetes types uses strategic-merge-patch**
+  (so list-merge keys like `containers[name=X]` merge correctly), with
+  fallback to JSON merge patch for CRDs and other types not registered in
+  `k8s.io/kubectl/pkg/scheme`. The `overwrite=true` semantics match
+  `helm upgrade`'s default reconcile behaviour: chart values override
+  out-of-band drift.
 - **Color in pipes.** `diffyml --color auto` correctly disables color when
   stdout isn't a TTY. For `| less -R`, pass `-- --color always`.
 

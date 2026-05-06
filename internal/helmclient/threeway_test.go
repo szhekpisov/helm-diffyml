@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const renderedFixture = `---
@@ -144,6 +146,50 @@ func TestWriteJSONAsYAMLDoc(t *testing.T) {
 	}
 	if !strings.Contains(out, "kind: Foo") || !strings.Contains(out, "name: alpha") {
 		t.Errorf("expected yaml-encoded body, got: %q", out)
+	}
+}
+
+// TestComputeThreeWayStrategicMergeMergesArraysByKey demonstrates the
+// strategic-merge advantage. A Deployment with two containers (sidecar +
+// web) where the chart only changes web's image must NOT replace the
+// sidecar — strategic merge lists `containers` with patchMergeKey=name.
+func TestComputeThreeWayStrategicMergeMergesArraysByKey(t *testing.T) {
+	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
+	original := []byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web"},"spec":{"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.25"},{"name":"sidecar","image":"envoy:1.30"}]}}}}`)
+	modified := []byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web"},"spec":{"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.27"},{"name":"sidecar","image":"envoy:1.30"}]}}}}`)
+	live := []byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web"},"spec":{"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.25"},{"name":"sidecar","image":"envoy:1.30"}]}}}}`)
+
+	patch, projected, err := computeThreeWay(gvk, original, modified, live)
+	if err != nil {
+		t.Fatalf("computeThreeWay: %v", err)
+	}
+	// Strategic patch should target only the changed container; if we had
+	// gone through JSON merge, the patch would replace the entire array.
+	if !contains(patch, "nginx:1.27") || !contains(patch, "name") {
+		t.Errorf("expected patch to target the web container; got %s", patch)
+	}
+	if !contains(projected, "envoy:1.30") {
+		t.Errorf("expected sidecar to survive in projected state; got %s", projected)
+	}
+}
+
+// TestComputeThreeWayUnknownKindFallsBackToJSONMerge ensures that types not
+// in the kubectl scheme (CRDs, etc.) still produce a valid patch via JSON
+// merge.
+func TestComputeThreeWayUnknownKindFallsBackToJSONMerge(t *testing.T) {
+	gvk := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "Whatever"}
+	original := []byte(`{"spec":{"size":1}}`)
+	modified := []byte(`{"spec":{"size":3}}`)
+	live := []byte(`{"spec":{"size":2}}`)
+	patch, projected, err := computeThreeWay(gvk, original, modified, live)
+	if err != nil {
+		t.Fatalf("computeThreeWay (CRD): %v", err)
+	}
+	if !contains(patch, "size") {
+		t.Errorf("expected json-merge patch to mention size, got %s", patch)
+	}
+	if !contains(projected, "3") {
+		t.Errorf("expected projected size=3, got %s", projected)
 	}
 }
 
