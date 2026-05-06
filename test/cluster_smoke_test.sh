@@ -158,12 +158,21 @@ case "$two_way" in
 esac
 
 # Three-way: live state has replicas=7, projected has replicas=3, so the
-# diff should mention replicas going 7 → 3.
+# diff should mention replicas going 7 → 3. If the assertion fails, dump
+# the no-neat / no-mask raw diff for diagnosis.
 three_way="$(helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" --three-way-merge)" \
   || fail "three-way upgrade exited non-zero"
 case "$three_way" in
   *replicas*7*) pass "three-way diff surfaces drift (replicas 7→3)" ;;
-  *)            fail "three-way diff should show the 7→3 drift, got: $three_way" ;;
+  *)
+    echo "  diagnostic: live deployment spec.replicas reported by kubectl:"
+    kubectl get deployment "${RELEASE}-web" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}' >&2 || true
+    echo
+    echo "  diagnostic: three-way diff with --no-neat --no-mask-secrets --no-omit-header:"
+    helm diffyml upgrade "$RELEASE" "$FIXTURE" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" \
+      --three-way-merge --no-neat --no-mask-secrets --no-omit-header >&2 || true
+    fail "three-way diff should show the 7→3 drift, got: $three_way"
+    ;;
 esac
 
 # Compose with --use-upgrade-dry-run for parity check (still detects drift).
