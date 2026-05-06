@@ -60,21 +60,28 @@ func (f *fakeRenderer) ThreeWayMerged(_, _ string, _ helmclient.RenderOptions, u
 	return f.threeWayLive, f.threeWayProjected, nil
 }
 
-// withFakes replaces the package-level newClient and osExit indirections
-// with test stubs, returning a cleanup function and a pointer to the captured
-// exit code.
-func withFakes(t *testing.T, fr *fakeRenderer) *int {
-	t.Helper()
-	prevClient := newClient
-	prevExit := osExit
-	t.Cleanup(func() {
-		newClient = prevClient
-		osExit = prevExit
-	})
-	newClient = func(string, string, bool) (helmclient.Renderer, error) { return fr, nil }
+// withFakes returns a Deps wired to the supplied fake renderer plus a
+// pointer that captures any exit code propagated by deps.Exit.
+func withFakes(_ *testing.T, fr *fakeRenderer) (Deps, *int) {
 	captured := -1
-	osExit = func(code int) { captured = code }
-	return &captured
+	deps := Deps{
+		NewClient: func(string, string, bool) (helmclient.Renderer, error) { return fr, nil },
+		Exit:      func(code int) { captured = code },
+	}
+	return deps, &captured
+}
+
+// runRunPath builds a fresh root tree from the supplied Deps, executes it
+// with the given args, and returns captured stdout / stderr / Execute error.
+func runRunPath(_ *testing.T, deps Deps, args ...string) (string, string, error) {
+	root := buildTestRootWith(deps)
+	stdout := newBuf()
+	stderr := newBuf()
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(args)
+	err := root.Execute()
+	return stdout.String(), stderr.String(), err
 }
 
 func TestUpgradeRunPathDefaultTemplate(t *testing.T) {
@@ -82,9 +89,9 @@ func TestUpgradeRunPathDefaultTemplate(t *testing.T) {
 		getManifest: []byte(yamlReplicas2),
 		template:    []byte(yamlReplicas3),
 	}
-	exit := withFakes(t, fr)
+	deps, exit := withFakes(t, fr)
 
-	out, errOut, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart")
+	out, errOut, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart")
 	if err != nil {
 		t.Fatalf("RunE returned error: %v\nstderr=%s", err, errOut)
 	}
@@ -104,9 +111,9 @@ func TestUpgradeRunPathExitCodeOnDifferences(t *testing.T) {
 		getManifest: []byte(yamlReplicas2),
 		template:    []byte(yamlReplicas3),
 	}
-	exit := withFakes(t, fr)
+	deps, exit := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--exit-code")
+	_, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart", "--exit-code")
 	if err != nil {
 		t.Fatalf("RunE returned error: %v", err)
 	}
@@ -121,9 +128,9 @@ func TestUpgradeRunPathInstallDryRunForMissingRelease(t *testing.T) {
 		getManifest:    nil,
 		installDryRun:  []byte(yamlReplicas3),
 	}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--use-upgrade-dry-run")
+	_, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart", "--use-upgrade-dry-run")
 	if err != nil {
 		t.Fatalf("RunE returned error: %v", err)
 	}
@@ -138,9 +145,9 @@ func TestUpgradeRunPathUpgradeDryRunForExistingRelease(t *testing.T) {
 		getManifest:   []byte(yamlReplicas2),
 		upgradeDryRun: []byte(yamlReplicas3),
 	}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--use-upgrade-dry-run")
+	_, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart", "--use-upgrade-dry-run")
 	if err != nil {
 		t.Fatalf("RunE returned error: %v", err)
 	}
@@ -155,9 +162,9 @@ func TestUpgradeRunPathThreeWayDispatch(t *testing.T) {
 		threeWayLive:      []byte(yamlReplicas2),
 		threeWayProjected: []byte(yamlReplicas3),
 	}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	out, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge")
+	out, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge")
 	if err != nil {
 		t.Fatalf("RunE returned error: %v", err)
 	}
@@ -178,9 +185,9 @@ func TestUpgradeRunPathThreeWayWithUseUpgradeDryRun(t *testing.T) {
 		threeWayLive:      []byte(yamlReplicas2),
 		threeWayProjected: []byte(yamlReplicas3),
 	}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge", "--use-upgrade-dry-run")
+	_, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge", "--use-upgrade-dry-run")
 	if err != nil {
 		t.Fatalf("RunE returned error: %v", err)
 	}
@@ -191,26 +198,22 @@ func TestUpgradeRunPathThreeWayWithUseUpgradeDryRun(t *testing.T) {
 
 func TestUpgradeRunPathGetManifestError(t *testing.T) {
 	fr := &fakeRenderer{getManifestErr: errors.New("boom")}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart")
+	_, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart")
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected wrapped 'boom' error, got %v", err)
 	}
 }
 
 func TestUpgradeRunPathThreeWayError(t *testing.T) {
-	fr := &fakeRenderer{}
-	prev := newClient
-	t.Cleanup(func() { newClient = prev })
-	newClient = func(string, string, bool) (helmclient.Renderer, error) {
-		return &errRenderer{fakeRenderer: *fr}, nil
+	er := &errRenderer{}
+	deps := Deps{
+		NewClient: func(string, string, bool) (helmclient.Renderer, error) { return er, nil },
+		Exit:      func(int) {},
 	}
-	prevExit := osExit
-	osExit = func(int) {}
-	t.Cleanup(func() { osExit = prevExit })
 
-	_, _, err := runSubcommand(t, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge")
+	_, _, err := runRunPath(t, deps, "upgrade", "my-rel", "/tmp/chart", "--three-way-merge")
 	if err == nil || !strings.Contains(err.Error(), "three-way merge") {
 		t.Fatalf("expected three-way-wrapped error, got %v", err)
 	}
@@ -226,9 +229,9 @@ func (e *errRenderer) ThreeWayMerged(string, string, helmclient.RenderOptions, b
 
 func TestReleaseRunPath(t *testing.T) {
 	fr := &fakeRenderer{getManifest: []byte(yamlReplicas2)}
-	exit := withFakes(t, fr)
+	deps, exit := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "release", "rel-a", "rel-b")
+	_, _, err := runRunPath(t, deps, "release", "rel-a", "rel-b")
 	if err != nil {
 		t.Fatalf("release RunE returned error: %v", err)
 	}
@@ -239,9 +242,9 @@ func TestReleaseRunPath(t *testing.T) {
 
 func TestReleaseMissingRelease(t *testing.T) {
 	fr := &fakeRenderer{getManifest: nil}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "release", "rel-a", "rel-b")
+	_, _, err := runRunPath(t, deps, "release", "rel-a", "rel-b")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected 'not found' error, got %v", err)
 	}
@@ -249,8 +252,8 @@ func TestReleaseMissingRelease(t *testing.T) {
 
 func TestRevisionRunPath(t *testing.T) {
 	fr := &fakeRenderer{getManifest: []byte(yamlReplicas2)}
-	withFakes(t, fr)
-	_, _, err := runSubcommand(t, "revision", "my-rel", "1", "2")
+	deps, _ := withFakes(t, fr)
+	_, _, err := runRunPath(t, deps, "revision", "my-rel", "1", "2")
 	if err != nil {
 		t.Fatalf("revision RunE returned error: %v", err)
 	}
@@ -258,8 +261,8 @@ func TestRevisionRunPath(t *testing.T) {
 
 func TestRevisionMissingRelease(t *testing.T) {
 	fr := &fakeRenderer{getManifest: nil}
-	withFakes(t, fr)
-	_, _, err := runSubcommand(t, "revision", "my-rel", "1", "2")
+	deps, _ := withFakes(t, fr)
+	_, _, err := runRunPath(t, deps, "revision", "my-rel", "1", "2")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected 'not found' error, got %v", err)
 	}
@@ -270,9 +273,9 @@ func TestRollbackImplicitRevisionResolved(t *testing.T) {
 		previousRevision: 4,
 		getManifest:      []byte(yamlReplicas2),
 	}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "rollback", "my-rel")
+	_, _, err := runRunPath(t, deps, "rollback", "my-rel")
 	if err != nil {
 		t.Fatalf("rollback RunE returned error: %v", err)
 	}
@@ -280,9 +283,9 @@ func TestRollbackImplicitRevisionResolved(t *testing.T) {
 
 func TestRollbackImplicitNoPreviousRevision(t *testing.T) {
 	fr := &fakeRenderer{previousRevision: 0}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "rollback", "my-rel")
+	_, _, err := runRunPath(t, deps, "rollback", "my-rel")
 	if err == nil || !strings.Contains(err.Error(), "no previous revision") {
 		t.Fatalf("expected no-previous error, got %v", err)
 	}
@@ -290,9 +293,9 @@ func TestRollbackImplicitNoPreviousRevision(t *testing.T) {
 
 func TestRollbackHistoryFails(t *testing.T) {
 	fr := &fakeRenderer{previousRevisionErr: errors.New("history kaput")}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "rollback", "my-rel")
+	_, _, err := runRunPath(t, deps, "rollback", "my-rel")
 	if err == nil || !strings.Contains(err.Error(), "history kaput") {
 		t.Fatalf("expected wrapped history error, got %v", err)
 	}
@@ -300,9 +303,9 @@ func TestRollbackHistoryFails(t *testing.T) {
 
 func TestRollbackExplicitRevision(t *testing.T) {
 	fr := &fakeRenderer{getManifest: []byte(yamlReplicas2)}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "rollback", "my-rel", "3")
+	_, _, err := runRunPath(t, deps, "rollback", "my-rel", "3")
 	if err != nil {
 		t.Fatalf("rollback RunE returned error: %v", err)
 	}
@@ -310,9 +313,9 @@ func TestRollbackExplicitRevision(t *testing.T) {
 
 func TestRollbackMissingRelease(t *testing.T) {
 	fr := &fakeRenderer{getManifest: nil, previousRevision: 1}
-	withFakes(t, fr)
+	deps, _ := withFakes(t, fr)
 
-	_, _, err := runSubcommand(t, "rollback", "my-rel", "1")
+	_, _, err := runRunPath(t, deps, "rollback", "my-rel", "1")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected 'not found' error, got %v", err)
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/szhekpisov/helm-diffyml/internal/helmclient"
 )
 
-func newUpgradeCmd() *cobra.Command {
+func newUpgradeCmd(deps Deps) *cobra.Command {
 	var (
 		// Helm-passthrough.
 		valueFiles   []string
@@ -70,7 +70,7 @@ install --dry-run as the fallback for missing releases).`,
 				useThreeWay = false
 			}
 
-			client, err := helmclient.New(namespace, kubeContext, false)
+			client, err := deps.NewClient(namespace, kubeContext, false)
 			if err != nil {
 				return err
 			}
@@ -137,7 +137,7 @@ install --dry-run as the fallback for missing releases).`,
 			code, runErr := diff.Run(from, to, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			// Forward verbatim exit codes (1 = diffs with --exit-code,
 			// 255 = diffyml tool error).
-			os.Exit(code)
+			deps.Exit(code)
 			return runErr // unreachable, but satisfies the signature
 		},
 	}

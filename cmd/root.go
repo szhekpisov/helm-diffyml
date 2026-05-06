@@ -4,28 +4,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rootCmd is the entrypoint exposed via Helm's plugin runner.
-var rootCmd = &cobra.Command{
-	Use:   "helm-diffyml",
-	Short: "Structural YAML diff for Helm releases",
-	Long: `helm-diffyml wraps the diffyml structural-diff engine to compare
+// buildRoot returns a fully-wired root command tree. Production code calls
+// it with defaultDeps(); tests can pass their own Deps with fakes.
+func buildRoot(deps Deps) *cobra.Command {
+	root := &cobra.Command{
+		Use:   "helm-diffyml",
+		Short: "Structural YAML diff for Helm releases",
+		Long: `helm-diffyml wraps the diffyml structural-diff engine to compare
 rendered Kubernetes manifests across Helm operations: pending upgrades,
 existing releases, specific revisions, and rollbacks.`,
-	SilenceUsage:  true,
-	SilenceErrors: false,
+		SilenceUsage:  true,
+		SilenceErrors: false,
+	}
+	root.AddCommand(newVersionCmd())
+	root.AddCommand(newUpgradeCmd(deps))
+	root.AddCommand(newReleaseCmd(deps))
+	root.AddCommand(newRevisionCmd(deps))
+	root.AddCommand(newRollbackCmd(deps))
+	return root
 }
 
-// Execute runs the root command. Returns the error from Cobra; cmd-specific
-// exit codes (1 for differences with --exit-code, 255 for diffyml errors) are
-// propagated by os.Exit calls inside the subcommand handlers.
+// Execute runs the production root command. Subcommand handlers may call
+// deps.Exit (default os.Exit) to propagate diff exit codes.
 func Execute() error {
-	return rootCmd.Execute()
-}
-
-func init() {
-	rootCmd.AddCommand(newVersionCmd())
-	rootCmd.AddCommand(newUpgradeCmd())
-	rootCmd.AddCommand(newReleaseCmd())
-	rootCmd.AddCommand(newRevisionCmd())
-	rootCmd.AddCommand(newRollbackCmd())
+	return buildRoot(defaultDeps()).Execute()
 }

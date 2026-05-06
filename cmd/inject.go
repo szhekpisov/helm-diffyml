@@ -6,21 +6,28 @@ import (
 	"github.com/szhekpisov/helm-diffyml/internal/helmclient"
 )
 
-// osExit is a package-level indirection on os.Exit so unit tests can
-// replace it with a no-op (otherwise os.Exit aborts the test binary
-// before the assertion runs). All cmd handlers exit through this var.
-var osExit = os.Exit
-
-// newClient is a package-level indirection on helmclient.New so unit
-// tests can plug in a fake Renderer without touching a real cluster.
+// Deps bundles the external integrations every subcommand needs. Production
+// code uses defaultDeps; unit tests construct a Deps with fakes.
 //
-// Initialised to a named function rather than an inline literal because the
-// Go compiler / coverage instrumentation can substitute calls to a var
-// holding a func-literal initialiser with direct calls to the underlying
-// body, which defeats the test seam (observed empirically on Linux/amd64
-// with `-race -coverpkg=./...`).
-var newClient = realNewClient
+// Passing this through buildRoot()/newXCmd(deps) avoids the package-level
+// var test seam, which proved unreliable under Go's coverage-instrumentation
+// rewriting on Linux/amd64 — the closures inside RunE were observed to bind
+// the package var at construction time, ignoring later reassignments.
+type Deps struct {
+	// NewClient builds a Renderer (helmclient.Client in production, a fake
+	// in tests). The Renderer talks to Helm and the cluster.
+	NewClient func(namespace, kubeContext string, debug bool) (helmclient.Renderer, error)
+	// Exit is the os.Exit indirection so tests can capture the propagated
+	// exit code without aborting the test binary.
+	Exit func(code int)
+}
 
-func realNewClient(namespace, kubeContext string, debug bool) (helmclient.Renderer, error) {
-	return helmclient.New(namespace, kubeContext, debug)
+// defaultDeps wires Deps to the real helmclient.New + os.Exit.
+func defaultDeps() Deps {
+	return Deps{
+		NewClient: func(namespace, kubeContext string, debug bool) (helmclient.Renderer, error) {
+			return helmclient.New(namespace, kubeContext, debug)
+		},
+		Exit: os.Exit,
+	}
 }

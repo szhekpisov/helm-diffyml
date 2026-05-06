@@ -8,7 +8,7 @@ import (
 	"github.com/szhekpisov/helm-diffyml/internal/diff"
 )
 
-func newReleaseCmd() *cobra.Command {
+func newReleaseCmd(deps Deps) *cobra.Command {
 	var (
 		namespace   string
 		kubeContext string
@@ -37,7 +37,7 @@ func newReleaseCmd() *cobra.Command {
 				return nil
 			}
 
-			client, err := newClient(namespace, kubeContext, false)
+			client, err := deps.NewClient(namespace, kubeContext, false)
 			if err != nil {
 				return err
 			}
@@ -66,7 +66,7 @@ func newReleaseCmd() *cobra.Command {
 			opts.Extra = extractDiffymlExtraArgs(cmd)
 
 			code, runErr := diff.Run(from, to, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
-			osExit(code)
+			deps.Exit(code)
 			return runErr
 		},
 	}
