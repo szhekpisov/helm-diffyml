@@ -204,6 +204,64 @@ func TestNewBadDriverReturnsError(t *testing.T) {
 	}
 }
 
+// TestThreeWayMergedAgainstLiveClusterDeletion seeds both a live ConfigMap
+// and a corresponding helm release manifest entry, then renders a chart
+// that no longer contains the ConfigMap. The chart-removed resource must
+// surface as a deletion (live populated, projected empty).
+func TestThreeWayMergedAgainstLiveClusterDeletion(t *testing.T) {
+	c := liveClient(t)
+
+	// Seed a release whose stored manifest tracks a ConfigMap that the
+	// fixture chart does NOT render — the per-chart pruning is simulated
+	// by hand-crafting the stored manifest below.
+	seedRelease(t, c, "to-prune", 1, `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drop-rel-config
+data:
+  greeting: hello
+`)
+
+	// Create the live ConfigMap so the deletion-detection getLive call
+	// finds it and emits the live document into the live stream.
+	dyn, mapper, err := c.dynamicLookup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gvk := schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+	mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "drop-rel-config", "namespace": "default"},
+		"data":       map[string]any{"greeting": "hello"},
+	}}
+	if _, err := dyn.Resource(mapping.Resource).Namespace("default").Create(context.TODO(), cm, metav1Create()); err != nil {
+		t.Fatalf("seed configmap: %v", err)
+	}
+
+	// Render a tiny temporary chart with no resources at all, so every
+	// resource in the stored manifest counts as removed.
+	emptyChart := t.TempDir()
+	if err := writeFile(emptyChart+"/Chart.yaml", "apiVersion: v2\nname: prune-test\nversion: 0.0.1\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	live, projected, err := c.ThreeWayMerged("to-prune", emptyChart, RenderOptions{}, false)
+	if err != nil {
+		t.Fatalf("ThreeWayMerged: %v", err)
+	}
+	if !strings.Contains(string(live), "drop-rel-config") {
+		t.Errorf("expected live stream to contain the to-be-deleted configmap, got:\n%s", live)
+	}
+	if strings.Contains(string(projected), "drop-rel-config") {
+		t.Errorf("projected should NOT contain the removed configmap, got:\n%s", projected)
+	}
+}
+
 // TestGetLiveNotFound exercises getLive for a resource that doesn't exist.
 func TestGetLiveNotFound(t *testing.T) {
 	c := liveClient(t)

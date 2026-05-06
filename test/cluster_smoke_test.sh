@@ -191,5 +191,19 @@ case "$combo" in
   *)            fail "three-way + use-upgrade-dry-run should also surface drift, got: $combo" ;;
 esac
 
+# Resource-removal detection: render a pruned chart that drops the Secret
+# template; the live Secret should appear as a deletion in three-way mode.
+PRUNED="$(mktemp -d)"
+cp -R "$FIXTURE"/* "$PRUNED/"
+rm "$PRUNED/templates/secret.yaml"
+
+removed="$(helm diffyml upgrade "$RELEASE" "$PRUNED" -f "$FIXTURE/values-changed.yaml" -n "$NAMESPACE" --three-way-merge)" \
+  || fail "three-way upgrade against pruned chart exited non-zero"
+case "$removed" in
+  *one\ document\ removed*Secret*) pass "three-way surfaces chart-removed Secret as a deletion" ;;
+  *)                                fail "expected deletion of the chart-removed Secret, got: $removed" ;;
+esac
+rm -rf "$PRUNED"
+
 echo
 echo "All cluster smoke checks passed."

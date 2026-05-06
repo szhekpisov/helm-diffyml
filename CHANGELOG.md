@@ -15,8 +15,9 @@ Each plugin tag pins a specific `diffyml` version (embedded as a Go library).
   admission webhooks) that the default two-way `helm get manifest` path
   cannot see. Native Kubernetes types use strategic-merge-patch (so
   array fields like `containers` merge by `name` instead of being
-  replaced wholesale); CRDs fall back to JSON merge. Composes with
-  `--use-upgrade-dry-run`.
+  replaced wholesale); CRDs fall back to JSON merge. Resources tracked
+  by the release's stored manifest but absent from the new render are
+  surfaced as deletions. Composes with `--use-upgrade-dry-run`.
 
 ## [0.1.0]
 

@@ -33,9 +33,21 @@ const lastAppliedAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
 // the cluster to.
 //
 // Resources that don't yet exist in the cluster contribute a pure addition
-// (live = empty, projected = rendered manifest). The reverse case (resources
-// removed from the chart but still in the cluster) is not handled here yet.
+// (live = empty, projected = rendered manifest). Resources tracked by the
+// release's stored manifest but removed from the new render contribute a
+// pure deletion (live = current cluster state, projected = empty) — i.e.
+// helm-diff parity.
 func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOptions, useUpgradeDryRun bool) ([]byte, []byte, error) {
+	// Snapshot the release manifest BEFORE invoking renderForThreeWay,
+	// because helm's action.NewInstall (used by Template) clobbers the
+	// in-memory release storage state with a fake "pending" entry for the
+	// release name when DryRun is set, after which action.NewGet returns
+	// "release: not found" until the action.Configuration is re-init'd.
+	storedManifest, err := c.storedManifestByKey(releaseName)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	rendered, err := c.renderForThreeWay(releaseName, chartPath, opts, useUpgradeDryRun)
 	if err != nil {
 		return nil, nil, err
@@ -44,11 +56,6 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 	objs, err := splitYAMLToUnstructured(rendered)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse rendered chart: %w", err)
-	}
-
-	storedManifest, err := c.storedManifestByKey(releaseName)
-	if err != nil {
-		return nil, nil, err
 	}
 
 	// Lazy: only build the dynamic client when there's at least one object
@@ -65,7 +72,9 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 	}
 
 	var liveStream, projectedStream bytes.Buffer
+	rendered_keys := make(map[string]struct{}, len(objs))
 	for _, obj := range objs {
+		rendered_keys[objKey(obj)] = struct{}{}
 		modifiedJSON, err := obj.MarshalJSON()
 		if err != nil {
 			return nil, nil, fmt.Errorf("encode rendered %s: %w", objKey(obj), err)
@@ -124,6 +133,51 @@ func (c *Client) ThreeWayMerged(releaseName, chartPath string, opts RenderOption
 		if err := writeJSONAsYAMLDoc(&projectedStream, projectedJSON); err != nil {
 			return nil, nil, err
 		}
+	}
+
+	// Deletion detection: anything in the stored manifest the new render no
+	// longer produces is a removal. Surface it as live=current, projected=
+	// empty so diffyml renders a deletion block.
+	for storedKey, storedDoc := range storedManifest {
+		if _, kept := rendered_keys[storedKey]; kept {
+			continue
+		}
+		removedObj, err := unstructuredFromYAML(storedDoc)
+		if err != nil {
+			if debug {
+				fmt.Fprintf(os.Stderr, "  %s: stored doc unparseable, skipping deletion (%v)\n", storedKey, err)
+			}
+			continue
+		}
+		if !dynBuilt {
+			d, m, derr := c.dynamicLookup()
+			if derr != nil {
+				return nil, nil, fmt.Errorf("build dynamic client: %w", derr)
+			}
+			dyn, mapper, dynBuilt = d, m, true
+		}
+		liveObj, err := getLive(context.TODO(), dyn, mapper, removedObj, c.namespaceFor(opts))
+		if err != nil {
+			// Already deleted out-of-band, or kind no longer registered — nothing to delete.
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				if debug {
+					fmt.Fprintf(os.Stderr, "  %s: chart-removed but already absent in cluster\n", storedKey)
+				}
+				continue
+			}
+			return nil, nil, fmt.Errorf("get live %s for deletion check: %w", storedKey, err)
+		}
+		liveJSON, err := liveObj.MarshalJSON()
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode live %s: %w", storedKey, err)
+		}
+		if debug {
+			fmt.Fprintf(os.Stderr, "  %s: chart-removed → marking deletion\n", storedKey)
+		}
+		if err := writeJSONAsYAMLDoc(&liveStream, liveJSON); err != nil {
+			return nil, nil, err
+		}
+		// Nothing written to projectedStream → diffyml sees a deletion.
 	}
 
 	if debug {
@@ -232,6 +286,15 @@ func getLive(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper,
 	return ri.Get(ctx, name, metav1.GetOptions{})
 }
 
+// unstructuredFromYAML parses a single YAML document into an unstructured.
+func unstructuredFromYAML(doc string) (*unstructured.Unstructured, error) {
+	raw := map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(doc), &raw); err != nil {
+		return nil, err
+	}
+	return &unstructured.Unstructured{Object: raw}, nil
+}
+
 // splitYAMLToUnstructured parses a multi-doc YAML stream into typed
 // unstructured objects. Skips empty documents.
 func splitYAMLToUnstructured(in []byte) ([]*unstructured.Unstructured, error) {
@@ -255,7 +318,8 @@ func splitYAMLToUnstructured(in []byte) ([]*unstructured.Unstructured, error) {
 
 // storedManifestByKey returns the helm-stored manifest, indexed by
 // "kind/namespace/name". Used as the fallback "original" when a live object
-// has no kubectl last-applied annotation.
+// has no kubectl last-applied annotation, and as the source of truth for
+// detecting resources removed from the chart but still in the cluster.
 func (c *Client) storedManifestByKey(releaseName string) (map[string]string, error) {
 	manifest, err := c.GetManifest(releaseName, 0)
 	if err != nil {
@@ -265,8 +329,7 @@ func (c *Client) storedManifestByKey(releaseName string) (map[string]string, err
 		return map[string]string{}, nil
 	}
 	out := make(map[string]string)
-	docs := splitYAMLDocs(string(manifest))
-	for _, doc := range docs {
+	for _, doc := range splitYAMLDocs(string(manifest)) {
 		key, err := keyFromYAMLDoc(doc)
 		if err != nil {
 			continue
