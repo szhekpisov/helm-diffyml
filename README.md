@@ -14,6 +14,38 @@ helm diffyml rollback my-release           # preview rollback to previous revisi
 helm diffyml version
 ```
 
+## Compared to helm-diff
+
+[`helm-diff`](https://github.com/databus23/helm-diff) is the long-established
+incumbent. Its default output is a **textual** unified diff of the rendered
+YAML; passing `--output dyff` switches it to a structural diff via
+[dyff](https://github.com/homeport/dyff). helm-diffyml is structural by
+design (uses [`diffyml`](https://github.com/szhekpisov/diffyml) as the
+engine), so the apples-to-apples comparison is against `helm diff --output
+dyff`, not the textual default.
+
+What helm-diffyml adds over `helm diff --output dyff`:
+
+| Feature | helm-diffyml | `helm diff --output dyff` |
+|---|---|---|
+| `--neat` — automatic stripping of Helm/ArgoCD/Flux-injected and `kubectl.kubernetes.io/last-applied-configuration` noise | ✓ profile-based, on by default | ✗ (helm-diff offers per-path `--suppress`) |
+| `--mask-secrets` — field-level redaction of `data`/`stringData` on `Kind: Secret` | ✓ on by default (mask placeholder is configurable) | ✗ (helm-diff has `--show-secrets`, an all-or-nothing toggle for the whole resource) |
+| Color highlighting *inside* string values (e.g. `nginx:1.25 → nginx:1.27` highlights just the version) | ✓ | ✗ |
+| CI-platform output formats (`-o github`, `-o gitlab`, `-o gitea`) and `-o json-patch` (RFC 6902) | ✓ | ✗ (only its own structured / json / template) |
+| Single self-contained binary (diff engine embedded as a Go library) | ✓ | helm-diff also single-binary, but its dyff support is built in via the dyff Go library too |
+
+What helm-diff still has more of:
+
+- Battle-testing and ecosystem reach (8+ years, ArgoCD/FluxCD/helmfile integration, Krew listing, Windows builds).
+- A wider native flag set (`--suppress`, `HELM_DIFF_TPL` Go templates, `--strip-trailing-cr`, `--disable-*-validation`, etc.).
+- `revision` subcommand support for some additional history paths (e.g.
+  including hooks via release storage, which neither tool currently does).
+
+If you're already happy with `helm diff` and want structural output, just
+pass `--output dyff` — that's a smaller change than swapping plugins. If
+you specifically want the noise filtering, secret masking, and the broader
+output catalog above, that's the case for helm-diffyml.
+
 ## Install
 
 ```sh
