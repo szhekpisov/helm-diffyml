@@ -21,6 +21,10 @@ jobs:
       - run: go vet ./...
       - run: go build -trimpath -o bin/helm-diffyml .
       - run: ./bin/helm-diffyml version
+      - name: Install envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.29 -p path)" >> "$GITHUB_ENV"
       - name: Test with coverage
         run: go test ./... -race -coverprofile=coverage.out -coverpkg=./...
       - name: Enforce ≥80% coverage

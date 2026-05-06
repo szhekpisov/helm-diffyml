@@ -7,11 +7,19 @@ import (
 	"github.com/szhekpisov/helm-diffyml/cmd"
 )
 
+// osExit is a package-level indirection so the unit test can stub it; calling
+// os.Exit directly from main would terminate the test binary.
+var osExit = os.Exit
+
 func main() {
+	osExit(run())
+}
+
+// run returns the exit code so the logic is testable in isolation.
+func run() int {
 	if err := cmd.Execute(); err != nil {
-		// Cobra has already printed the user-facing error; this is a
-		// safety net for unexpected paths.
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		return 2
 	}
+	return 0
 }
