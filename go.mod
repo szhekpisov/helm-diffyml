@@ -5,10 +5,11 @@ go 1.26.2
 require (
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/spf13/cobra v1.10.2
-	github.com/szhekpisov/diffyml v1.6.0
+	github.com/szhekpisov/diffyml v1.6.1
 	helm.sh/helm/v3 v3.20.2
 	k8s.io/apimachinery v0.36.0
 	k8s.io/client-go v0.35.1
+	k8s.io/kubectl v0.35.1
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -116,7 +117,6 @@ require (
 	k8s.io/component-base v0.35.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
-	k8s.io/kubectl v0.35.1 // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect
 	oras.land/oras-go/v2 v2.6.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
